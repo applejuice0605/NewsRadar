@@ -191,7 +191,7 @@ ai_analysis:
   include_rank_timeline: true
 podcast:
   enabled: true
-  voice: zh-CN-YunyangNeural
+  voice: zh-CN-XiaoxiaoNeural
   rate: +0%
   volume: +0%
   max_source_chars: 12000
