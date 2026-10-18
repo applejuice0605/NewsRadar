@@ -50,6 +50,8 @@ class SiteFeatureTests(unittest.TestCase):
             self.assertNotIn("/trends.html", page)
             self.assertNotIn("/status.html", page)
             self.assertNotIn("/sources.html", page)
+            self.assertNotIn("report-experience", page)
+            self.assertNotIn("/events.html", page)
             self.assertIn("/archive.html", page)
             self.assertIn("/assets/brand/favicon-32.png", page)
             self.assertIn("newsradar-wordmark.png", page)
@@ -77,6 +79,9 @@ class SiteFeatureTests(unittest.TestCase):
             self.assertIn("/trends.html", page)
             self.assertTrue((site / "audio" / "daily.mp3").exists())
             self.assertTrue((site / "sources.html").exists())
+            self.assertIn("report-experience", page)
+            self.assertIn("/events.html", page)
+            self.assertTrue((site / "experience.json").exists())
 
     def test_preview_restores_features_removed_from_production_html(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:
@@ -96,6 +101,8 @@ class SiteFeatureTests(unittest.TestCase):
             self.assertIn('/trends.html', page)
             self.assertIn('/status.html', page)
             self.assertIn('/sources.html', page)
+            self.assertIn('/events.html', page)
+            self.assertIn('/search.html', page)
 
     def test_individual_override(self) -> None:
         switches = MODULE.FEATURE_DEFAULTS["production"].copy()

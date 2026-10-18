@@ -21,7 +21,7 @@ from urllib.parse import quote, urlsplit
 
 REPO_DIR = Path(__file__).resolve().parents[1]
 DEFAULT_SITE_DIR = REPO_DIR / "docs"
-RANGES = (1, 7, 30)
+RANGES = (1, 7, 30, 90)
 TOP_ARTICLES_LIMIT = 8
 
 
@@ -344,6 +344,10 @@ def _tables(connection: sqlite3.Connection) -> set[str]:
     return {str(row[0]) for row in connection.execute("SELECT name FROM sqlite_master WHERE type='table'")}
 
 
+def _columns(connection: sqlite3.Connection, table: str) -> set[str]:
+    return {str(row[1]) for row in connection.execute(f"PRAGMA table_info({table})")}
+
+
 def _rank_details(connection: sqlite3.Connection) -> dict[int, tuple[int | None, float]]:
     histories: dict[int, list[tuple[str, int, int]]] = defaultdict(list)
     for row in connection.execute(
@@ -393,12 +397,16 @@ def _load_news_database(path: Path, day: date) -> list[dict[str, Any]]:
             else {}
         )
         has_platforms = "platforms" in tables
+        news_columns = _columns(connection, "news_items")
         source_join = "LEFT JOIN platforms AS p ON p.id = n.platform_id" if has_platforms else ""
         source_name = "COALESCE(p.name, n.platform_id)" if has_platforms else "n.platform_id"
+        first_seen = "n.first_crawl_time" if "first_crawl_time" in news_columns else "NULL"
+        last_seen = "n.last_crawl_time" if "last_crawl_time" in news_columns else "NULL"
+        crawl_count = "n.crawl_count" if "crawl_count" in news_columns else "1"
         rows = connection.execute(
             f"""
             SELECT n.id, n.title, n.platform_id, {source_name} AS source_name,
-                   n.url, n.mobile_url, n.rank
+                   n.url, n.mobile_url, n.rank, {first_seen}, {last_seen}, {crawl_count}
             FROM news_items AS n {source_join}
             """
         )
@@ -417,6 +425,11 @@ def _load_news_database(path: Path, day: date) -> list[dict[str, Any]]:
                     "best_rank": best_rank,
                     "momentum": momentum,
                     "tags": tags.get(item_id, []),
+                    "published_at": None,
+                    "first_seen_at": _iso_time(row[7]),
+                    "last_seen_at": _iso_time(row[8]),
+                    "crawl_count": int(row[9] or 1),
+                    "summary": None,
                 }
             )
         return records
@@ -433,11 +446,18 @@ def _load_rss_database(path: Path, day: date) -> list[dict[str, Any]]:
             else {}
         )
         has_feeds = "rss_feeds" in tables
+        rss_columns = _columns(connection, "rss_items")
         source_join = "LEFT JOIN rss_feeds AS f ON f.id = i.feed_id" if has_feeds else ""
         source_name = "COALESCE(f.name, i.feed_id)" if has_feeds else "i.feed_id"
+        published_at = "i.published_at" if "published_at" in rss_columns else "NULL"
+        first_seen = "i.first_crawl_time" if "first_crawl_time" in rss_columns else "NULL"
+        last_seen = "i.last_crawl_time" if "last_crawl_time" in rss_columns else "NULL"
+        crawl_count = "i.crawl_count" if "crawl_count" in rss_columns else "1"
+        summary = "i.summary" if "summary" in rss_columns else "NULL"
         rows = connection.execute(
             f"""
-            SELECT i.id, i.title, i.feed_id, {source_name} AS source_name, i.url
+            SELECT i.id, i.title, i.feed_id, {source_name} AS source_name, i.url,
+                   {published_at}, {first_seen}, {last_seen}, {crawl_count}, {summary}
             FROM rss_items AS i {source_join}
             """
         )
@@ -452,6 +472,11 @@ def _load_rss_database(path: Path, day: date) -> list[dict[str, Any]]:
                 "best_rank": None,
                 "momentum": 0.0,
                 "tags": tags.get(int(row[0]), []),
+                "published_at": _iso_time(row[5]),
+                "first_seen_at": _iso_time(row[6]),
+                "last_seen_at": _iso_time(row[7]),
+                "crawl_count": int(row[8] or 1),
+                "summary": str(row[9]).strip()[:1200] if row[9] else None,
             }
             for row in rows
         ]
@@ -717,7 +742,7 @@ def render_trends_html(trends: dict[str, Any]) -> str:
     @media(max-width:820px) {{ .controls {{ grid-template-columns:1fr 1fr; }} .range-switch {{ grid-column:1/-1; }} .stats {{ grid-template-columns:repeat(2,minmax(0,1fr)); }} .stat {{ border-bottom:3px solid var(--ink); }} }}
     @media(max-width:600px) {{ .controls {{ grid-template-columns:1fr; }} .articles {{ grid-template-columns:1fr; }} .article:nth-child(odd) {{ border-right:0; }} }}
     </style></head><body><a class="skip-link" href="#main-content">跳到正文</a><main class="shell" id="main-content"><header class="masthead"><div class="masthead-row"><div><h1>Trend Signals</h1><p class="subtitle">AI 标签、热度排名与跨来源聚合</p></div><nav aria-label="主导航">{_nav("trends")}</nav></div></header>
-    <section class="panel controls" aria-label="趋势筛选"><div><span class="eyebrow">时间范围</span><div class="range-switch" role="group" aria-label="选择时间范围"><button type="button" data-range="1" aria-pressed="true">1 日</button><button type="button" data-range="7" aria-pressed="false">7 日</button><button type="button" data-range="30" aria-pressed="false">30 日</button></div></div><label for="keyword">关键词<input id="keyword" type="search" placeholder="搜索主题或文章"></label><label for="source">平台<select id="source"><option value="">全部平台</option></select></label></section>
+    <section class="panel controls" aria-label="趋势筛选"><div><span class="eyebrow">时间范围</span><div class="range-switch" role="group" aria-label="选择时间范围"><button type="button" data-range="1" aria-pressed="true">1 日</button><button type="button" data-range="7" aria-pressed="false">7 日</button><button type="button" data-range="30" aria-pressed="false">30 日</button><button type="button" data-range="90" aria-pressed="false">90 日</button></div></div><label for="keyword">关键词<input id="keyword" type="search" placeholder="搜索主题或文章"></label><label for="source">平台<select id="source"><option value="">全部平台</option></select></label></section>
     <div class="summary" id="summary" aria-live="polite"></div><div class="topics" id="topics"></div><p class="empty" id="noResults">没有符合筛选条件的趋势。</p></main>
     <script id="trend-data" type="application/json">{_inline_json(trends)}</script><script>
     (() => {{

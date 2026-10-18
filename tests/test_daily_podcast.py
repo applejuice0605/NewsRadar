@@ -51,6 +51,22 @@ class DailyPodcastTest(unittest.TestCase):
             self.assertFalse(expired.exists())
             self.assertFalse((root / "latest.json").exists())
 
+    def test_builds_bounded_seekable_chapters(self) -> None:
+        script = "\n\n".join(
+            ["今天先快速看三条重要新闻。"]
+            + [f"第{index}个主题有一项已经确认的事实，也有值得观察的后续。" for index in range(1, 9)]
+        )
+
+        chapters = podcast.build_chapters(script)
+
+        self.assertLessEqual(len(chapters), 6)
+        self.assertEqual(chapters[0]["title"], "今日速览")
+        self.assertEqual(chapters[0]["start_seconds"], 0)
+        self.assertEqual(
+            [chapter["start_seconds"] for chapter in chapters],
+            sorted(chapter["start_seconds"] for chapter in chapters),
+        )
+
 
 if __name__ == "__main__":
     unittest.main()

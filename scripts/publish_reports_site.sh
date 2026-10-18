@@ -33,6 +33,9 @@ python3 "$REPO_DIR/scripts/generate_reports_archive.py"
 if [ -f "$REPO_DIR/scripts/generate_site_insights.py" ]; then
   python3 "$REPO_DIR/scripts/generate_site_insights.py"
 fi
+if [ -f "$REPO_DIR/scripts/generate_product_experience.py" ]; then
+  python3 "$REPO_DIR/scripts/generate_product_experience.py"
+fi
 if [ "$APPLY_FEATURES" = "1" ]; then
   python3 "$REPO_DIR/scripts/apply_site_features.py" \
     --site-dir "$SITE_DIR" \
@@ -40,7 +43,8 @@ if [ "$APPLY_FEATURES" = "1" ]; then
     --speech "${NEWSRADAR_FEATURE_SPEECH:-}" \
     --trends "${NEWSRADAR_FEATURE_TRENDS:-}" \
     --status "${NEWSRADAR_FEATURE_STATUS:-}" \
-    --sources "${NEWSRADAR_FEATURE_SOURCES:-}"
+    --sources "${NEWSRADAR_FEATURE_SOURCES:-}" \
+    --experience "${NEWSRADAR_FEATURE_EXPERIENCE:-}"
 fi
 
 echo "[site] reports synced to $SITE_DIR"

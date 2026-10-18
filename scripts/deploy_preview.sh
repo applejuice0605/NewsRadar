@@ -35,11 +35,16 @@ mkdir -p "$PREVIEW_DIR/assets/brand"
 rsync -a --delete "$REPO_DIR/docs/assets/brand/" "$PREVIEW_DIR/assets/brand/"
 cp "$REPO_DIR/docs/assets/report-speech.css" "$PREVIEW_DIR/assets/report-speech.css"
 cp "$REPO_DIR/docs/assets/report-speech.js" "$PREVIEW_DIR/assets/report-speech.js"
+cp "$REPO_DIR/docs/assets/report-experience.css" "$PREVIEW_DIR/assets/report-experience.css"
+cp "$REPO_DIR/docs/assets/report-experience.js" "$PREVIEW_DIR/assets/report-experience.js"
 if [ -d "$PRODUCTION_DIR/TrendRadar/output/audio" ]; then
   mkdir -p "$PREVIEW_DIR/audio"
   rsync -a --delete "$PRODUCTION_DIR/TrendRadar/output/audio/" "$PREVIEW_DIR/audio/"
 fi
 python3 "$REPO_DIR/scripts/generate_site_insights.py" \
+  --repo-dir "$DATA_REPO" \
+  --site-dir "$PREVIEW_DIR"
+python3 "$REPO_DIR/scripts/generate_product_experience.py" \
   --repo-dir "$DATA_REPO" \
   --site-dir "$PREVIEW_DIR"
 python3 "$REPO_DIR/scripts/apply_site_features.py" \
@@ -48,7 +53,8 @@ python3 "$REPO_DIR/scripts/apply_site_features.py" \
   --speech "${NEWSRADAR_FEATURE_SPEECH:-}" \
   --trends "${NEWSRADAR_FEATURE_TRENDS:-}" \
   --status "${NEWSRADAR_FEATURE_STATUS:-}" \
-  --sources "${NEWSRADAR_FEATURE_SOURCES:-}"
+  --sources "${NEWSRADAR_FEATURE_SOURCES:-}" \
+  --experience "${NEWSRADAR_FEATURE_EXPERIENCE:-}"
 
 echo "[preview] deploying newsradar-preview"
 npx wrangler deploy --env preview

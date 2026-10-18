@@ -51,6 +51,35 @@
       meta.textContent = metadata.date + ' · ' +
         (metadata.voice_label || VOICE_LABELS[metadata.voice] || '自然中文语音');
       body.append(audio, meta);
+      if (Array.isArray(metadata.chapters) && metadata.chapters.length) {
+        var chapters = document.createElement('div');
+        chapters.className = 'podcast-chapters';
+        chapters.setAttribute('aria-label', '播客章节');
+        metadata.chapters.forEach(function (chapter) {
+          var button = document.createElement('button');
+          button.type = 'button';
+          button.className = 'podcast-chapter';
+          button.textContent = chapter.title;
+          button.addEventListener('click', function () {
+            audio.currentTime = Number(chapter.start_seconds || 0);
+            audio.play().catch(function () {});
+          });
+          chapters.appendChild(button);
+        });
+        body.appendChild(chapters);
+      }
+      if ('IntersectionObserver' in window) {
+        audio.addEventListener('play', function () {
+          var observer = new IntersectionObserver(function (entries) {
+            body.classList.toggle('is-mini', !entries[0].isIntersecting && !audio.paused);
+          }, { threshold: 0.15 });
+          observer.observe(section);
+          audio.addEventListener('ended', function () {
+            body.classList.remove('is-mini');
+            observer.disconnect();
+          }, { once: true });
+        }, { once: true });
+      }
     } else {
       body.className = 'podcast-empty';
       var message = document.createElement('strong');

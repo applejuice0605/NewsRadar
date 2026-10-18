@@ -14,6 +14,8 @@ class ReportPodcastUiTests(unittest.TestCase):
         self.assertIn("云扬 · 中文男声", script)
         self.assertIn("晓晓 · 中文女声", script)
         self.assertIn("今日播客暂未生成", script)
+        self.assertIn("podcast-chapters", script)
+        self.assertIn("is-mini", script)
         self.assertNotIn("speechSynthesis", script)
         self.assertNotIn("开始朗读", script)
         self.assertNotIn("speechRate", script)

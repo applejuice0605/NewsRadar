@@ -34,6 +34,7 @@ def create_news_db(path: Path, title: str, tag: str | None = None) -> None:
         if tag:
             connection.execute("INSERT INTO ai_filter_tags VALUES (1, ?, 1, 'active')", (tag,))
             connection.execute("INSERT INTO ai_filter_results VALUES (1, 'hotlist', 1, .9, 'active')")
+        connection.commit()
 
 
 class GenerateSiteInsightsTest(unittest.TestCase):
@@ -51,6 +52,7 @@ class GenerateSiteInsightsTest(unittest.TestCase):
             create_news_db(news / "2026-10-15.db", "当日文章", "AI")
             with closing(sqlite3.connect(news / "2026-10-15.db")) as connection:
                 connection.execute("UPDATE news_items SET url = 'javascript:alert(1)'")
+                connection.commit()
             (news / "2026-10-13.db").write_bytes(b"not sqlite")
             (meta / "runtime_health.json").write_text(
                 json.dumps(

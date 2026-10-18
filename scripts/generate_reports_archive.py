@@ -255,6 +255,8 @@ def _page_html(grouped: dict[str, list[Path]]) -> str:
       <div class="toolbar">
         <a class="button" href="/">返回首页</a>
         <a class="button" href="/trends.html">趋势查询</a>
+        <a class="button" href="/events.html">事件追踪</a>
+        <a class="button" href="/search.html">全文搜索</a>
         <a class="button" href="/status.html">运行状态</a>
         <a class="button" href="/sources.html">候选源</a>
         <button class="button" type="button" id="showAll">全部日期</button>
@@ -366,6 +368,11 @@ def _page_html(grouped: dict[str, list[Path]]) -> str:
       if (input.value) visibleMonth = new Date(input.value + 'T00:00:00');
       filterByDate(input.value);
     }});
+    const requestedDate = new URLSearchParams(window.location.search).get('date');
+    if (requestedDate && /^\d{{4}}-\d{{2}}-\d{{2}}$/.test(requestedDate)) {{
+      visibleMonth = new Date(requestedDate + 'T00:00:00');
+      filterByDate(requestedDate);
+    }}
     renderCalendar();
   </script>
 </body>

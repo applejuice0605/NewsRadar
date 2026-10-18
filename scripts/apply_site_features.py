@@ -11,14 +11,15 @@ from pathlib import Path
 
 
 FEATURE_DEFAULTS = {
-    "production": {"speech": False, "trends": False, "status": False, "sources": False},
-    "preview": {"speech": True, "trends": True, "status": True, "sources": True},
+    "production": {"speech": False, "trends": False, "status": False, "sources": False, "experience": False},
+    "preview": {"speech": True, "trends": True, "status": True, "sources": True, "experience": True},
 }
 
 ROUTE_FILES = {
     "trends": ("trends.html", "trends.json"),
     "status": ("status.html", "health.json"),
     "sources": ("sources.html", "sources.json"),
+    "experience": ("experience.json", "search-index.json", "events.html", "search.html", "notification-preview.json"),
 }
 
 FAVICON_HTML = (
@@ -60,10 +61,18 @@ SPEECH_ASSETS_HTML = (
     '<link rel="stylesheet" href="/assets/report-speech.css">'
     '<script src="/assets/report-speech.js" defer></script>'
 )
+EXPERIENCE_ASSETS_HTML = (
+    '<link rel="stylesheet" href="/assets/report-experience.css">'
+    '<script src="/assets/report-experience.js" defer></script>'
+)
 FEATURE_LINKS = {
     "trends": '<a class="site-archive-link" href="/trends.html" title="查看七天和三十天趋势">趋势</a>',
     "status": '<a class="site-archive-link" href="/status.html" title="查看采集与发布状态">状态</a>',
     "sources": '<a class="site-archive-link" href="/sources.html" title="查看候选源灰度内容">候选</a>',
+    "experience": (
+        '<a class="site-archive-link" href="/search.html" title="搜索历史新闻">搜索</a>'
+        '<a class="site-archive-link" href="/events.html" title="查看事件时间线">事件</a>'
+    ),
 }
 
 
@@ -149,18 +158,40 @@ def apply_features(site_dir: Path, environment: str, switches: dict[str, bool]) 
                 content,
                 flags=re.IGNORECASE,
             )
+        if switches["experience"]:
+            if "/assets/report-experience.css" not in content and "</head>" in content:
+                content = content.replace("</head>", f"{EXPERIENCE_ASSETS_HTML}</head>", 1)
+        else:
+            content = re.sub(
+                r'\s*<link\b[^>]*href=["\']/assets/report-experience\.css["\'][^>]*>',
+                "",
+                content,
+                flags=re.IGNORECASE,
+            )
+            content = re.sub(
+                r'\s*<script\b[^>]*src=["\']/assets/report-experience\.js["\'][^>]*>\s*</script>',
+                "",
+                content,
+                flags=re.IGNORECASE,
+            )
         enabled_links = "".join(
             FEATURE_LINKS[feature]
-            for feature in ("trends", "status", "sources")
-            if switches[feature] and f'/{feature}.html' not in content
+            for feature in ("trends", "status", "sources", "experience")
+            if switches[feature]
+            and (
+                (feature != "experience" and f'/{feature}.html' not in content)
+                or (feature == "experience" and '/events.html' not in content)
+            )
         )
-        if enabled_links and 'href="/archive.html"' in content:
+        if enabled_links and 'href="/archive.html"' in content and 'class="header-title"' in content:
             archive_anchor = re.search(r'<a\b[^>]*href="/archive\.html"[^>]*>.*?</a>', content, re.DOTALL)
             if archive_anchor:
                 content = content[: archive_anchor.end()] + enabled_links + content[archive_anchor.end() :]
         for feature in ROUTE_FILES:
             if not switches[feature]:
                 content = remove_anchor(content, feature)
+        if not switches["experience"]:
+            content = remove_anchor(remove_anchor(content, "events"), "search")
         html_path.write_text(content, encoding="utf-8")
 
     for feature, filenames in ROUTE_FILES.items():

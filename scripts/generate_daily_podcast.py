@@ -7,6 +7,7 @@ import argparse
 import asyncio
 import hashlib
 import json
+import math
 import re
 import shutil
 import sys
@@ -93,6 +94,28 @@ def clean_script(value: str, max_chars: int) -> str:
     value = re.sub(r"^\s*(?:[-*•]|\d+[.)、])\s*", "", value, flags=re.M)
     value = re.sub(r"\n{3,}", "\n\n", value).strip()
     return value[:max_chars].rsplit("\n", 1)[0].strip() if len(value) > max_chars else value
+
+
+def build_chapters(script: str) -> list[dict[str, Any]]:
+    """Create stable, approximate seek points from the editor-style paragraphs."""
+    paragraphs = [re.sub(r"\s+", " ", item).strip() for item in re.split(r"\n\s*\n", script)]
+    paragraphs = [item for item in paragraphs if item]
+    if not paragraphs:
+        return []
+    if len(paragraphs) > 6:
+        chunk_size = math.ceil(len(paragraphs) / 6)
+        paragraphs = [" ".join(paragraphs[index:index + chunk_size]) for index in range(0, len(paragraphs), chunk_size)]
+    chapters = []
+    elapsed = 0
+    labels = ["今日速览", "重点一", "重点二", "重点三", "延伸观察", "今日结语"]
+    for index, paragraph in enumerate(paragraphs):
+        excerpt = re.split(r"[。！？]", paragraph, maxsplit=1)[0].strip()
+        title = labels[index] if index < len(labels) else f"章节 {index + 1}"
+        if index > 0 and 4 <= len(excerpt) <= 18:
+            title = excerpt
+        chapters.append({"title": title, "start_seconds": elapsed})
+        elapsed += max(8, round(len(paragraph) / 4.2))
+    return chapters
 
 
 def load_podcast_config() -> tuple[dict[str, Any], dict[str, Any]]:
@@ -229,7 +252,7 @@ def main() -> int:
     asyncio.run(synthesize(script, audio_path, voice, rate, volume))
     transcript_path.write_text(script + "\n", encoding="utf-8")
     metadata = {
-        "schema_version": 1,
+        "schema_version": 2,
         "date": date,
         "generated_at": now.isoformat(timespec="seconds"),
         "source_hash": content_hash,
@@ -238,6 +261,10 @@ def main() -> int:
         "rate": rate,
         "volume": volume,
         "script_chars": len(script),
+        "chapters": build_chapters(script),
+        "format": "daily_editorial",
+        "target_duration_minutes": "6-8",
+        "maximum_duration_minutes": 10,
         "audio_url": f"/audio/{date}/daily.mp3",
         "transcript_url": f"/audio/{date}/daily.txt",
     }
