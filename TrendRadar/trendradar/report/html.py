@@ -229,29 +229,28 @@ def render_html_content(
             }
 
             .header-brand {
-                display: flex;
-                align-items: center;
-                gap: 8px;
-                width: clamp(248px, 31vw, 318px);
+                display: block;
+                width: clamp(300px, 38vw, 380px);
                 margin: 0;
                 position: absolute;
-                top: 10px;
+                top: 6px;
                 left: 12px;
                 z-index: 2;
             }
 
             .header-brand-mark {
-                flex: 0 0 auto;
-                width: clamp(58px, 7vw, 76px);
+                position: absolute;
+                top: -4px;
+                right: 0;
+                width: clamp(56px, 6vw, 68px);
                 height: auto;
+                z-index: 2;
             }
 
             .header-brand-wordmark {
                 display: block;
-                min-width: 0;
-                width: auto;
+                width: calc(100% - 28px);
                 height: auto;
-                max-width: calc(100% - 66px);
             }
 
             .header-info {
@@ -1936,16 +1935,15 @@ def render_html_content(
                 .content { padding: 16px; }
                 .header { padding: 24px 14px 26px; min-height: 250px; }
                 .header-watermark { font-size: clamp(28px, 10vw, 42px); }
-                .save-buttons { margin-top: 88px; }
+                .save-buttons { margin-top: 98px; }
                 .header-title { font-size: 19px; margin-top: 12px; }
                 .header-brand {
-                    width: min(242px, 68vw);
-                    top: 8px;
+                    width: min(286px, 78vw);
+                    top: 6px;
                     left: 8px;
-                    gap: 6px;
                 }
-                .header-brand-mark { width: 58px; }
-                .header-brand-wordmark { max-width: calc(100% - 64px); }
+                .header-brand-mark { width: 52px; top: -3px; }
+                .header-brand-wordmark { width: calc(100% - 24px); }
                 .header-info,
                 body.wide-mode .header-info { grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px; }
                 body.wide-mode .container { max-width: 100%; }
