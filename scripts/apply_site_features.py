@@ -30,15 +30,21 @@ POWERED_BY_HTML = (
     'target="_blank" rel="noopener noreferrer" class="footer-link project-name">NewsRadar</a>'
 )
 WORDMARK_HTML = (
-    '<img class="header-brand" src="/assets/brand/newsradar-wordmark.png" alt="NewsRadar">'
+    '<div class="header-brand" aria-label="NewsRadar">'
+    '<img class="header-brand-mark" src="/assets/brand/newsradar-mark-512.png" alt="">'
+    '<img class="header-brand-wordmark" src="/assets/brand/newsradar-wordmark.png" alt="NewsRadar">'
+    '</div>'
 )
 WORDMARK_STYLE = (
     '<style id="newsradar-brand-style">'
-    '.header-brand{display:block;width:clamp(150px,24vw,220px);height:auto;margin:0;position:absolute;'
-    'top:14px;left:16px;z-index:2;object-fit:contain;object-position:left top}'
-    '.header-title{margin-top:72px}'
-    '@media(max-width:480px){.header-brand{width:min(148px,42vw);top:12px;left:12px}'
-    '.save-buttons{margin-top:68px}.header-title{margin-top:24px}'
+    '.header-brand{display:flex;align-items:center;gap:8px;width:clamp(248px,31vw,318px);margin:0;'
+    'position:absolute;top:10px;left:12px;z-index:2}'
+    '.header-brand-mark{flex:0 0 auto;width:clamp(58px,7vw,76px);height:auto}'
+    '.header-brand-wordmark{display:block;min-width:0;width:auto;height:auto;max-width:calc(100% - 66px)}'
+    '.header-title{margin-top:60px}'
+    '@media(max-width:480px){.header-brand{width:min(242px,68vw);top:8px;left:8px;gap:6px}'
+    '.header-brand-mark{width:58px}.header-brand-wordmark{max-width:calc(100% - 64px)}'
+    '.save-buttons{margin-top:88px}.header-title{margin-top:12px}'
     '.header-info,body.wide-mode .header-info{grid-template-columns:repeat(2,minmax(0,1fr));gap:8px}'
     'body.wide-mode .container{max-width:100%}body.wide-mode .content{padding:16px}'
     'body.wide-mode .rss-feeds-grid,body.wide-mode .ai-section .ai-blocks-grid,'
@@ -51,6 +57,15 @@ SOCIAL_IMAGE_HTML = (
     '<meta property="og:image:width" content="1200">'
     '<meta property="og:image:height" content="630">'
 )
+SPEECH_ASSETS_HTML = (
+    '<link rel="stylesheet" href="/assets/report-speech.css">'
+    '<script src="/assets/report-speech.js" defer></script>'
+)
+FEATURE_LINKS = {
+    "trends": '<a class="site-archive-link" href="/trends.html" title="查看七天和三十天趋势">趋势</a>',
+    "status": '<a class="site-archive-link" href="/status.html" title="查看采集与发布状态">状态</a>',
+    "sources": '<a class="site-archive-link" href="/sources.html" title="查看候选源灰度内容">候选</a>',
+}
 
 
 def parse_switch(value: str | None, default: bool) -> bool:
@@ -102,6 +117,13 @@ def apply_features(site_dir: Path, environment: str, switches: dict[str, bool]) 
             content = content.replace("</head>", f"{FAVICON_HTML}</head>", 1)
         if 'property="og:image"' not in content and "</head>" in content:
             content = content.replace("</head>", f"{SOCIAL_IMAGE_HTML}</head>", 1)
+        content = re.sub(
+            r'<img class="header-brand"[^>]*>',
+            WORDMARK_HTML,
+            content,
+            count=1,
+            flags=re.IGNORECASE,
+        )
         if 'class="header-title"' in content and 'class="header-brand"' not in content:
             content = content.replace("</head>", f"{WORDMARK_STYLE}</head>", 1)
             content = content.replace('<div class="header-title">', f'{WORDMARK_HTML}<div class="header-title">', 1)
@@ -112,7 +134,10 @@ def apply_features(site_dir: Path, environment: str, switches: dict[str, bool]) 
             content,
             flags=re.IGNORECASE | re.DOTALL,
         )
-        if not switches["speech"]:
+        if switches["speech"]:
+            if "/assets/report-speech.css" not in content and "</head>" in content:
+                content = content.replace("</head>", f"{SPEECH_ASSETS_HTML}</head>", 1)
+        else:
             content = re.sub(
                 r'\s*<link\b[^>]*href=["\']/assets/report-speech\.css["\'][^>]*>',
                 "",
@@ -125,6 +150,15 @@ def apply_features(site_dir: Path, environment: str, switches: dict[str, bool]) 
                 content,
                 flags=re.IGNORECASE,
             )
+        enabled_links = "".join(
+            FEATURE_LINKS[feature]
+            for feature in ("trends", "status", "sources")
+            if switches[feature] and f'/{feature}.html' not in content
+        )
+        if enabled_links and 'href="/archive.html"' in content:
+            archive_anchor = re.search(r'<a\b[^>]*href="/archive\.html"[^>]*>.*?</a>', content, re.DOTALL)
+            if archive_anchor:
+                content = content[: archive_anchor.end()] + enabled_links + content[archive_anchor.end() :]
         for feature in ROUTE_FILES:
             if not switches[feature]:
                 content = remove_anchor(content, feature)

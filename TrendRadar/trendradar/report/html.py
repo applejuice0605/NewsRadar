@@ -229,16 +229,29 @@ def render_html_content(
             }
 
             .header-brand {
-                display: block;
-                width: clamp(150px, 24vw, 220px);
-                height: auto;
+                display: flex;
+                align-items: center;
+                gap: 8px;
+                width: clamp(248px, 31vw, 318px);
                 margin: 0;
                 position: absolute;
-                top: 14px;
-                left: 16px;
+                top: 10px;
+                left: 12px;
                 z-index: 2;
-                object-fit: contain;
-                object-position: left top;
+            }
+
+            .header-brand-mark {
+                flex: 0 0 auto;
+                width: clamp(58px, 7vw, 76px);
+                height: auto;
+            }
+
+            .header-brand-wordmark {
+                display: block;
+                min-width: 0;
+                width: auto;
+                height: auto;
+                max-width: calc(100% - 66px);
             }
 
             .header-info {
@@ -1923,13 +1936,16 @@ def render_html_content(
                 .content { padding: 16px; }
                 .header { padding: 24px 14px 26px; min-height: 250px; }
                 .header-watermark { font-size: clamp(28px, 10vw, 42px); }
-                .save-buttons { margin-top: 68px; }
-                .header-title { font-size: 19px; margin-top: 24px; }
+                .save-buttons { margin-top: 88px; }
+                .header-title { font-size: 19px; margin-top: 12px; }
                 .header-brand {
-                    width: min(148px, 42vw);
-                    top: 12px;
-                    left: 12px;
+                    width: min(242px, 68vw);
+                    top: 8px;
+                    left: 8px;
+                    gap: 6px;
                 }
+                .header-brand-mark { width: 58px; }
+                .header-brand-wordmark { max-width: calc(100% - 64px); }
                 .header-info,
                 body.wide-mode .header-info { grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px; }
                 body.wide-mode .container { max-width: 100%; }
@@ -1974,7 +1990,10 @@ def render_html_content(
                         </div>
                     </div>
                 </div>
-                <img class="header-brand" src="/assets/brand/newsradar-wordmark.png" alt="NewsRadar">
+                <div class="header-brand" aria-label="NewsRadar">
+                    <img class="header-brand-mark" src="/assets/brand/newsradar-mark-512.png" alt="">
+                    <img class="header-brand-wordmark" src="/assets/brand/newsradar-wordmark.png" alt="NewsRadar">
+                </div>
                 <div class="header-title">热点新闻趋势</div>
                 <div class="header-info">"""
 

@@ -10,6 +10,7 @@ class ReportPodcastUiTests(unittest.TestCase):
         script = (REPO / "docs" / "assets" / "report-speech.js").read_text(encoding="utf-8")
         self.assertIn("AI 播客", script)
         self.assertIn("matchesReport(metadata)", script)
+        self.assertIn("'/audio/' + pathMatch[1] + '/daily.json'", script)
         self.assertIn("云扬 · 中文男声", script)
         self.assertIn("晓晓 · 中文女声", script)
         self.assertIn("今日播客暂未生成", script)

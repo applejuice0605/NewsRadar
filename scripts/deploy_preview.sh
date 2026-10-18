@@ -33,6 +33,8 @@ python3 "$REPO_DIR/scripts/prepare_preview_site.py" \
 # from the live collector worktree so feature testing never freezes old news.
 mkdir -p "$PREVIEW_DIR/assets/brand"
 rsync -a --delete "$REPO_DIR/docs/assets/brand/" "$PREVIEW_DIR/assets/brand/"
+cp "$REPO_DIR/docs/assets/report-speech.css" "$PREVIEW_DIR/assets/report-speech.css"
+cp "$REPO_DIR/docs/assets/report-speech.js" "$PREVIEW_DIR/assets/report-speech.js"
 if [ -d "$PRODUCTION_DIR/TrendRadar/output/audio" ]; then
   mkdir -p "$PREVIEW_DIR/audio"
   rsync -a --delete "$PRODUCTION_DIR/TrendRadar/output/audio/" "$PREVIEW_DIR/audio/"

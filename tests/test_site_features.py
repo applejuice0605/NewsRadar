@@ -53,9 +53,9 @@ class SiteFeatureTests(unittest.TestCase):
             self.assertIn("/archive.html", page)
             self.assertIn("/assets/brand/favicon-32.png", page)
             self.assertIn("newsradar-wordmark.png", page)
-            self.assertIn("top:14px", page)
-            self.assertIn("margin-top:72px", page)
-            self.assertIn("margin-top:68px", page)
+            self.assertIn("top:10px", page)
+            self.assertIn("margin-top:60px", page)
+            self.assertIn("margin-top:88px", page)
             self.assertIn("grid-template-columns:repeat(2", page)
             self.assertNotIn("drop-shadow(5px 5px", page)
             self.assertIn("https://github.com/applejuice0605/NewsRadar.git", page)
@@ -77,6 +77,25 @@ class SiteFeatureTests(unittest.TestCase):
             self.assertIn("/trends.html", page)
             self.assertTrue((site / "audio" / "daily.mp3").exists())
             self.assertTrue((site / "sources.html").exists())
+
+    def test_preview_restores_features_removed_from_production_html(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            site = self.create_site(Path(temporary))
+            stripped = HTML.replace('<link rel="stylesheet" href="/assets/report-speech.css">', "")
+            stripped = stripped.replace('<script src="/assets/report-speech.js" defer></script>', "")
+            stripped = stripped.replace('<a href="/trends.html">趋势</a>', "")
+            stripped = stripped.replace('<a href="/status.html">状态</a>', "")
+            stripped = stripped.replace('<a href="/sources.html">候选</a>', "")
+            (site / "index.html").write_text(stripped, encoding="utf-8")
+
+            MODULE.apply_features(site, "preview", MODULE.FEATURE_DEFAULTS["preview"].copy())
+
+            page = (site / "index.html").read_text(encoding="utf-8")
+            self.assertIn('/assets/report-speech.css', page)
+            self.assertIn('/assets/report-speech.js', page)
+            self.assertIn('/trends.html', page)
+            self.assertIn('/status.html', page)
+            self.assertIn('/sources.html', page)
 
     def test_individual_override(self) -> None:
         switches = MODULE.FEATURE_DEFAULTS["production"].copy()

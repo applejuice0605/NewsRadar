@@ -24,6 +24,11 @@
     return current.length === 5 ? metadata.date.slice(5) === current : metadata.date === current;
   }
 
+  function metadataUrl() {
+    var pathMatch = window.location.pathname.match(/\/reports\/(\d{4}-\d{2}-\d{2})(?:\/|\.html)/);
+    return pathMatch ? '/audio/' + pathMatch[1] + '/daily.json' : '/audio/latest.json';
+  }
+
   function panelMarkup(metadata, available) {
     var section = document.createElement('section');
     section.className = 'speech-panel';
@@ -63,7 +68,7 @@
   function init() {
     var content = document.querySelector('.content');
     if (!content || !window.fetch) return;
-    fetch('/audio/latest.json', { cache: 'no-store' })
+    fetch(metadataUrl(), { cache: 'no-store' })
       .then(function (response) {
         if (!response.ok) throw new Error('unavailable');
         return response.json();
