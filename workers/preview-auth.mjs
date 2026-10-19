@@ -27,6 +27,49 @@ async function secureEqual(actual, expected) {
   return difference === 0;
 }
 
+function parseRange(value, size) {
+  const match = /^bytes=(\d*)-(\d*)$/.exec(value || "");
+  if (!match || (!match[1] && !match[2]) || size <= 0) return null;
+  let start;
+  let end;
+  if (!match[1]) {
+    const suffixLength = Number(match[2]);
+    if (!Number.isSafeInteger(suffixLength) || suffixLength <= 0) return null;
+    start = Math.max(0, size - suffixLength);
+    end = size - 1;
+  } else {
+    start = Number(match[1]);
+    end = match[2] ? Number(match[2]) : size - 1;
+    if (!Number.isSafeInteger(start) || !Number.isSafeInteger(end)) return null;
+  }
+  if (start < 0 || start >= size || end < start) return null;
+  return { start, end: Math.min(end, size - 1) };
+}
+
+async function withByteRange(request, response) {
+  const rangeHeader = request.headers.get("Range");
+  if (!rangeHeader || request.method !== "GET" || response.status !== 200) return response;
+  const bytes = await response.arrayBuffer();
+  const range = parseRange(rangeHeader, bytes.byteLength);
+  if (!range) {
+    return new Response(null, {
+      status: 416,
+      headers: {
+        "Accept-Ranges": "bytes",
+        "Content-Range": `bytes */${bytes.byteLength}`,
+      },
+    });
+  }
+  const headers = new Headers(response.headers);
+  headers.set("Accept-Ranges", "bytes");
+  headers.set("Content-Length", String(range.end - range.start + 1));
+  headers.set("Content-Range", `bytes ${range.start}-${range.end}/${bytes.byteLength}`);
+  return new Response(bytes.slice(range.start, range.end + 1), {
+    status: 206,
+    headers,
+  });
+}
+
 export default {
   async fetch(request, env) {
     if (!env.PREVIEW_PASSWORD) {
@@ -42,6 +85,8 @@ export default {
       return unauthorized();
     }
 
-    return env.ASSETS.fetch(request);
+    return withByteRange(request, await env.ASSETS.fetch(request));
   },
 };
+
+export { parseRange, withByteRange };
