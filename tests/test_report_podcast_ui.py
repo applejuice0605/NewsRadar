@@ -24,6 +24,13 @@ class ReportPodcastUiTests(unittest.TestCase):
         generator = (REPO / "scripts" / "generate_daily_podcast.py").read_text(encoding="utf-8")
         self.assertIn('"voice_label"', generator)
 
+    def test_recommendations_expand_only_above_five_items(self) -> None:
+        script = (REPO / "docs" / "assets" / "report-experience.js").read_text(encoding="utf-8")
+        self.assertIn("DEFAULT_RECOMMENDATION_LIMIT = 5", script)
+        self.assertIn("articles.slice(0, DEFAULT_RECOMMENDATION_LIMIT)", script)
+        self.assertIn("total <= DEFAULT_RECOMMENDATION_LIMIT", script)
+        self.assertNotIn("展开所有重点依据", script)
+
 
 if __name__ == "__main__":
     unittest.main()

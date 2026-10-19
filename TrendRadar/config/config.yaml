@@ -191,10 +191,11 @@ ai_analysis:
   include_rank_timeline: true
 podcast:
   enabled: true
-  voice: zh-CN-XiaoxiaoNeural
+  voice: zh-CN-YunyangNeural
   rate: +0%
   volume: +0%
   max_source_chars: 12000
+  min_script_chars: 1700
   max_script_chars: 3200
   retention_days: 90
   prompt_file: podcast_prompt.txt

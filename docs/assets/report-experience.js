@@ -1,7 +1,8 @@
 (function () {
   'use strict';
 
-  var state = { data: null, articles: new Map(), active: 'global_important' };
+  var DEFAULT_RECOMMENDATION_LIMIT = 5;
+  var state = { data: null, articles: new Map(), active: 'global_important', expanded: false };
 
   function escapeHtml(value) {
     return String(value == null ? '' : value).replace(/[&<>"']/g, function (character) {
@@ -38,7 +39,8 @@
     if (!root || !state.data) return;
     var ids = state.data.recommendations[state.active] || [];
     var articles = ids.map(function (id) { return state.articles.get(id); }).filter(Boolean);
-    root.innerHTML = articles.map(function (article) {
+    var visibleArticles = state.expanded ? articles : articles.slice(0, DEFAULT_RECOMMENDATION_LIMIT);
+    root.innerHTML = visibleArticles.map(function (article) {
       return '<article class="experience-card">' +
         '<div class="experience-card-head"><div>' + articleLink(article) +
         '<p class="experience-meta">' + escapeHtml(article.source) + ' · ' + escapeHtml(article.date) +
@@ -47,6 +49,17 @@
         '<div class="experience-actions"><a href="/events.html#' + escapeHtml(article.event_id) + '">查看事件与依据</a></div>' +
         '</article>';
     }).join('') || '<p>当前没有可展示的重点新闻。</p>';
+    renderExpandControl(articles.length);
+  }
+
+  function renderExpandControl(total) {
+    var button = document.querySelector('.experience-expand');
+    if (!button) return;
+    button.hidden = total <= DEFAULT_RECOMMENDATION_LIMIT;
+    button.setAttribute('aria-expanded', String(state.expanded));
+    button.textContent = state.expanded
+      ? '收起到 ' + DEFAULT_RECOMMENDATION_LIMIT + ' 条'
+      : '展开全部 ' + total + ' 条';
   }
 
   function renderPanel() {
@@ -73,17 +86,23 @@
       '<button class="experience-tab" role="tab" data-kind="global_important" aria-selected="true">全局重要</button>' +
       '<button class="experience-tab" role="tab" data-kind="for_you" aria-selected="false">为你推荐</button></div>' +
       '<div class="experience-list" id="experienceList"></div>' +
-      '<div class="experience-actions"><a href="/search.html">搜索全部历史</a><a href="/events.html">查看事件追踪</a><a href="/trends.html">查看趋势</a></div>';
+      '<div class="experience-actions"><button class="experience-expand" type="button" hidden></button>' +
+      '<a href="/search.html">搜索全部历史</a><a href="/events.html">查看事件追踪</a><a href="/trends.html">查看趋势</a></div>';
     var insertion = content.querySelector('.search-bar') || content.firstChild;
     content.insertBefore(panel, insertion);
     panel.querySelectorAll('.experience-tab').forEach(function (button) {
       button.addEventListener('click', function () {
         state.active = button.dataset.kind;
+        state.expanded = false;
         panel.querySelectorAll('.experience-tab').forEach(function (item) {
           item.setAttribute('aria-selected', String(item === button));
         });
         renderList();
       });
+    });
+    panel.querySelector('.experience-expand').addEventListener('click', function () {
+      state.expanded = !state.expanded;
+      renderList();
     });
     renderList();
   }
@@ -123,29 +142,6 @@
     });
   }
 
-  function addExpandControl() {
-    var panel = document.querySelector('.experience-panel');
-    if (!panel || panel.querySelector('.experience-expand')) return;
-    var button = document.createElement('button');
-    button.type = 'button';
-    button.className = 'experience-expand';
-    button.textContent = localStorage.getItem('newsradar-details') === 'expanded' ? '收起所有依据' : '展开所有重点依据';
-    var actionGroups = panel.querySelectorAll('.experience-actions');
-    actionGroups[actionGroups.length - 1].prepend(button);
-    var expanded = localStorage.getItem('newsradar-details') === 'expanded';
-    function apply() {
-      document.querySelectorAll('.news-evidence').forEach(function (detail) { detail.hidden = !expanded; });
-      document.querySelectorAll('.news-evidence-toggle').forEach(function (toggle) {
-        toggle.setAttribute('aria-expanded', String(expanded));
-        toggle.textContent = expanded ? '收起推荐依据' : '查看推荐依据';
-      });
-      button.textContent = expanded ? '收起所有依据' : '展开所有重点依据';
-      localStorage.setItem('newsradar-details', expanded ? 'expanded' : 'compact');
-    }
-    button.addEventListener('click', function () { expanded = !expanded; apply(); });
-    apply();
-  }
-
   function init() {
     if (!window.fetch) return;
     fetch('/experience.json', { cache: 'no-store' }).then(function (response) {
@@ -156,7 +152,6 @@
       data.articles.forEach(function (article) { state.articles.set(article.id, article); });
       renderPanel();
       annotateReportItems();
-      addExpandControl();
     }).catch(function () { /* Existing report remains fully usable. */ });
   }
 
