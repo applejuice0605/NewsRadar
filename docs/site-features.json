@@ -4,6 +4,7 @@
     "speech": false,
     "trends": false,
     "status": false,
-    "sources": false
+    "sources": false,
+    "experience": false
   }
 }
