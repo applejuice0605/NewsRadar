@@ -94,6 +94,33 @@ def clean_script(value: str, max_chars: int) -> str:
     return value[:max_chars].rsplit("\n", 1)[0].strip() if len(value) > max_chars else value
 
 
+def expand_short_script(
+    client: AIClient,
+    script: str,
+    source: str,
+    min_chars: int,
+    max_chars: int,
+) -> str:
+    """Expand a short draft once without allowing facts beyond the source report."""
+    if len(script) >= min_chars:
+        return script
+    prompt = (
+        f"下面的中文播客稿只有 {len(script)} 个字符，请扩写到 {min_chars} 到 {max_chars} 个字符，"
+        "目标播报时长 6 到 8 分钟。保留快速新闻扫描、2 到 3 条重点分析和结尾观察。"
+        "只能使用参考材料中已有的事实；信息不足时增加解释和过渡，不得编造细节。"
+        "直接输出分段的口播正文，不要 Markdown。\n\n"
+        f"参考材料：\n{source}\n\n现有稿件：\n{script}"
+    )
+    return client.chat(
+        [
+            {"role": "system", "content": "你只输出事实可追溯的中文播客口播正文。"},
+            {"role": "user", "content": prompt},
+        ],
+        temperature=0.5,
+        max_tokens=3500,
+    )
+
+
 def build_chapters(script: str) -> list[dict[str, Any]]:
     """Create stable, approximate seek points from the editor-style paragraphs."""
     paragraphs = [re.sub(r"\s+", " ", item).strip() for item in re.split(r"\n\s*\n", script)]
@@ -163,6 +190,7 @@ def main() -> int:
 
     date = report_date.isoformat()
     source_limit = int(podcast.get("max_source_chars", 12000))
+    script_minimum = int(podcast.get("min_script_chars", 1700))
     script_limit = int(podcast.get("max_script_chars", 4500))
     content = content[:source_limit]
     content_hash = hashlib.sha256(content.encode("utf-8")).hexdigest()
@@ -194,6 +222,10 @@ def main() -> int:
         max_tokens=3000,
     )
     script = clean_script(script, script_limit)
+    if len(script) < script_minimum:
+        print(f"[podcast] draft is short ({len(script)} chars); expanding once")
+        script = expand_short_script(client, script, content, script_minimum, script_limit)
+        script = clean_script(script, script_limit)
     if len(script) < 120:
         print("[podcast] generated script is unexpectedly short", file=sys.stderr)
         return 1

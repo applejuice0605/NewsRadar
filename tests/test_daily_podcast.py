@@ -67,6 +67,17 @@ class DailyPodcastTest(unittest.TestCase):
             sorted(chapter["start_seconds"] for chapter in chapters),
         )
 
+    def test_short_script_does_not_expand_when_it_meets_minimum(self) -> None:
+        class Client:
+            def chat(self, *_args, **_kwargs):
+                raise AssertionError("chat should not be called")
+
+        script = "足够长的稿件"
+        self.assertEqual(
+            podcast.expand_short_script(Client(), script, "来源", len(script), 100),
+            script,
+        )
+
 
 if __name__ == "__main__":
     unittest.main()
