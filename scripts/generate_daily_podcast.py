@@ -123,8 +123,50 @@ def expand_short_script(
     )
 
 
+CHAPTER_TOPIC_RULES = (
+    (r"DeepSeek.{0,24}(?:故障|宕机)|(?:故障|宕机).{0,24}DeepSeek", "DeepSeek 服务故障"),
+    (r"国产大模型.{0,24}(?:数学|难题)|数学难题", "国产模型攻克数学难题"),
+    (r"Apple Intelligence|苹果.{0,20}(?:AI|人工智能).{0,12}(?:入华|中国)", "苹果 AI 入华"),
+    (r"推理效率|响应速度提升", "模型推理效率优化"),
+    (r"RTX Spark|万卡国产算力|算力.{0,16}(?:供应|基建|焦虑)", "AI 算力与硬件"),
+    (r"开源.{0,24}闭源|闭源.{0,24}开源", "开源与闭源竞争"),
+    (r"(?:应用落地|商业产品化|企业级迁移)", "AI 应用商业化"),
+    (r"DeepSeek.{0,20}V4", "DeepSeek V4.1 进展"),
+    (r"(?:银行|金融机构).{0,30}Agent|Agent.{0,30}(?:银行|金融机构)", "Agent 金融安全"),
+    (r"AI.{0,24}工作效率|(?:工程师|程序员|技术岗位|就业).{0,30}(?:效率|影响|收缩|焦虑|替代)", "AI 对就业的影响"),
+    (r"(?:成本叙事|融资成本|AI股票|AI 股票|高估值|估值逻辑)", "AI 成本与估值"),
+    (r"(?:技术民主化|API密钥|API 密钥|OpenCode).{0,40}(?:安全|攻击|外泄)?", "开源工具与安全风险"),
+    (r"(?:地缘政治|AI基础设施|AI 基础设施).{0,30}(?:风险|建设|合作)?", "AI 基建与地缘风险"),
+    (r"(?:监管|App Store).{0,30}(?:新规|审核|落地)", "AI 监管进展"),
+)
+
+
+def chapter_title(paragraph: str, index: int, total: int) -> str:
+    if index == 0:
+        return "今日速览"
+    if index == total - 1:
+        return "今日结语"
+    for pattern, title in CHAPTER_TOPIC_RULES:
+        if re.search(pattern, paragraph, flags=re.I):
+            return title
+    sentences = [item.strip(" *") for item in re.split(r"[。！？；;]", paragraph) if item.strip(" *")]
+    generic = re.compile(r"^(?:好|好了|那么|这里|过去几年|有意思的是|当然|与此同时|说完|接下来|再来说说)")
+    excerpt = next((item for item in sentences if not generic.match(item)), sentences[0] if sentences else "")
+    excerpt = re.sub(
+        r"^(?:重点[一二三四五六七八九十\d]+|延伸观察|首先|其次|接下来|再来看|最后)"
+        r"\s*[，、,:：。]?\s*",
+        "",
+        excerpt,
+    )
+    excerpt = re.sub(r"^第[一二三四五六七八九十\d]+\s*[，、,:：。]?\s*", "", excerpt)
+    title = re.split(r"[，、,:：]", excerpt, maxsplit=1)[0].strip(" *")
+    if len(title) > 18:
+        title = title[:18].rstrip() + "…"
+    return title if len(title) >= 4 else f"重点解读 {index}"
+
+
 def build_chapters(script: str) -> list[dict[str, Any]]:
-    """Create stable, approximate seek points from the editor-style paragraphs."""
+    """Create readable chapter labels and duration-independent seek ratios."""
     paragraphs = [re.sub(r"\s+", " ", item).strip() for item in re.split(r"\n\s*\n", script)]
     paragraphs = [item for item in paragraphs if item]
     if not paragraphs:
@@ -134,14 +176,17 @@ def build_chapters(script: str) -> list[dict[str, Any]]:
         paragraphs = [" ".join(paragraphs[index:index + chunk_size]) for index in range(0, len(paragraphs), chunk_size)]
     chapters = []
     elapsed = 0
-    labels = ["今日速览", "重点一", "重点二", "重点三", "延伸观察", "今日结语"]
+    consumed = 0
+    total_chars = sum(len(paragraph) for paragraph in paragraphs)
     for index, paragraph in enumerate(paragraphs):
-        excerpt = re.split(r"[。！？]", paragraph, maxsplit=1)[0].strip()
-        title = labels[index] if index < len(labels) else f"章节 {index + 1}"
-        if index > 0 and 4 <= len(excerpt) <= 18:
-            title = excerpt
-        chapters.append({"title": title, "start_seconds": elapsed})
+        title = chapter_title(paragraph, index, len(paragraphs))
+        chapters.append({
+            "title": title,
+            "start_seconds": elapsed,
+            "start_ratio": round(consumed / total_chars, 6) if total_chars else 0,
+        })
         elapsed += max(8, round(len(paragraph) / 4.2))
+        consumed += len(paragraph)
     return chapters
 
 

@@ -62,9 +62,38 @@ class DailyPodcastTest(unittest.TestCase):
         self.assertLessEqual(len(chapters), 6)
         self.assertEqual(chapters[0]["title"], "今日速览")
         self.assertEqual(chapters[0]["start_seconds"], 0)
+        self.assertEqual(chapters[0]["start_ratio"], 0)
+        self.assertEqual(chapters[-1]["title"], "今日结语")
         self.assertEqual(
             [chapter["start_seconds"] for chapter in chapters],
             sorted(chapter["start_seconds"] for chapter in chapters),
+        )
+        self.assertEqual(
+            [chapter["start_ratio"] for chapter in chapters],
+            sorted(chapter["start_ratio"] for chapter in chapters),
+        )
+
+    def test_chapter_titles_remove_generic_transitions(self) -> None:
+        chapters = podcast.build_chapters(
+            "今日先看几条新闻。\n\n"
+            "重点一，AI 芯片供应出现新变化，值得关注。\n\n"
+            "重点三：银行已经开始针对 Agent 风险采取行动了。\n\n"
+            "最后，继续观察市场变化。"
+        )
+
+        self.assertEqual(
+            [chapter["title"] for chapter in chapters],
+            ["今日速览", "AI 芯片供应出现新变化", "Agent 金融安全", "今日结语"],
+        )
+
+    def test_chapter_titles_prefer_factual_topics_over_filler(self) -> None:
+        self.assertEqual(
+            podcast.chapter_title("过去几年，AI 股票估值不断走高，但融资成本也在上升。", 1, 3),
+            "AI 成本与估值",
+        )
+        self.assertEqual(
+            podcast.chapter_title("这里我插一句，OpenCode 遭到攻击并造成 API 密钥外泄。", 1, 3),
+            "开源工具与安全风险",
         )
 
     def test_short_script_does_not_expand_when_it_meets_minimum(self) -> None:

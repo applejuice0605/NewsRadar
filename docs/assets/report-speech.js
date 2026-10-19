@@ -60,9 +60,28 @@
           button.type = 'button';
           button.className = 'podcast-chapter';
           button.textContent = chapter.title;
+          button.setAttribute('aria-label', '跳转到：' + chapter.title);
           button.addEventListener('click', function () {
-            audio.currentTime = Number(chapter.start_seconds || 0);
-            audio.play().catch(function () {});
+            function seekAndPlay() {
+              var ratio = Number(chapter.start_ratio);
+              var seconds = Number(chapter.start_seconds || 0);
+              var target = Number.isFinite(ratio) && Number.isFinite(audio.duration)
+                ? ratio * audio.duration
+                : seconds;
+              if (Number.isFinite(audio.duration)) {
+                target = Math.min(target, Math.max(0, audio.duration - 0.25));
+              }
+              audio.currentTime = Math.max(0, target);
+              chapters.querySelectorAll('.podcast-chapter').forEach(function (item) {
+                item.setAttribute('aria-pressed', String(item === button));
+              });
+              audio.play().catch(function () {});
+            }
+            if (audio.readyState >= 1) seekAndPlay();
+            else {
+              audio.addEventListener('loadedmetadata', seekAndPlay, { once: true });
+              audio.load();
+            }
           });
           chapters.appendChild(button);
         });
