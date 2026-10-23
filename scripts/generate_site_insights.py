@@ -17,6 +17,7 @@ from datetime import date, datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any, Iterable
 from urllib.parse import quote, urlsplit
+from zoneinfo import ZoneInfo
 
 
 REPO_DIR = Path(__file__).resolve().parents[1]
@@ -190,7 +191,7 @@ def build_public_health(raw: dict[str, Any] | None, now: datetime | None = None)
         success is False
         or "failed" in {notification_status, publish_status}
         or bool(source_failed)
-        or (gap_minutes is not None and gap_minutes > int(interval) + 15)
+        or (completed_dt is not None and (now - completed_dt).total_seconds() > (int(interval) + 15) * 60)
     ):
         overall_status = "degraded"
     elif success is True and notification_status != "failed" and publish_status != "failed":
@@ -200,6 +201,7 @@ def build_public_health(raw: dict[str, Any] | None, now: datetime | None = None)
 
     return {
         "generated_at": now.isoformat(),
+        "podcast": _section(raw, "podcast"),
         "overall_status": overall_status,
         "collection": {
             "last_started_at": _iso_time(_first(collection_raw, "last_started_at", "started_at")),
@@ -670,9 +672,11 @@ def render_status_html(health: dict[str, Any], pilot: dict[str, Any]) -> str:
     publish = health["publish"]
     schedule = health["schedule"]
     overall = str(health["overall_status"])
+    podcast = health.get("podcast", {})
     cards = [
         ("采集", "COLLECT", _status_label("success" if collection["success"] is True else "failed" if collection["success"] is False else "unknown"), _status_class("success" if collection["success"] is True else "failed" if collection["success"] is False else "unknown"), [("最近开始", collection["last_started_at"]), ("最近完成", collection["last_completed_at"]), ("耗时", _display(collection["duration_seconds"], " 秒")), ("成功来源", collection["source_success"]), ("失败来源", collection["source_failed"]), ("条目", collection["item_count"]), ("间隔", _display(collection["gap_minutes"], " 分钟")), ("补采", _display(collection["catch_up"]))]),
-        ("通知", "NOTIFY", _status_label(notification["status"]), _status_class(notification["status"]), [("最近尝试", notification["last_attempt_at"]), ("最近成功", notification["last_success_at"]), ("原因", notification["reason"])]),
+        ("飞书推送", "FEISHU", _status_label(notification["status"]), _status_class(notification["status"]), [("最近尝试", notification["last_attempt_at"]), ("最近成功", notification["last_success_at"]), ("原因", notification["reason"])]),
+        ("AI 播客", "PODCAST", _status_label(podcast.get("status", "unknown")), _status_class(podcast.get("status", "unknown")), [("最新一期", podcast.get("date")), ("生成时间", podcast.get("generated_at")), ("音色", podcast.get("voice"))]),
         ("发布", "PUBLISH", _status_label(publish["status"]), _status_class(publish["status"]), [("最近尝试", publish["last_attempt_at"]), ("最近成功", publish["last_success_at"]), ("提交", publish["commit"])]),
         ("调度", "SCHEDULE", "每 %s 分钟" % schedule["interval_minutes"], "good" if schedule["next_expected_at"] else "unknown", [("下次预期", schedule["next_expected_at"])]),
     ]
@@ -817,7 +821,17 @@ def _atomic_write(path: Path, content: str) -> None:
 
 def generate_site_insights(repo_dir: Path, site_dir: Path, now: datetime | None = None) -> tuple[dict[str, Any], dict[str, Any], list[str]]:
     output_dir = repo_dir / "TrendRadar" / "output"
-    health = build_public_health(_load_json(output_dir / "meta" / "runtime_health.json"), now=now)
+    runtime = _load_json(output_dir / "meta" / "runtime_health.json") or {}
+    podcast = _load_json(output_dir / "audio" / "latest.json") or {}
+    expected = (now or _utc_now()).astimezone(ZoneInfo("Asia/Shanghai"))
+    expected_day = expected.date() if expected.hour >= 22 else expected.date() - timedelta(days=1)
+    audio_file = output_dir / str(podcast.get("audio_url", "")).lstrip("/")
+    runtime["podcast"] = {
+        "date": podcast.get("date"), "generated_at": podcast.get("generated_at"),
+        "voice": podcast.get("voice_label", podcast.get("voice")),
+        "status": "success" if podcast.get("date", "") >= expected_day.isoformat() and audio_file.is_file() and audio_file.stat().st_size > 1000 else "failed",
+    }
+    health = build_public_health(runtime, now=now)
     pilot = build_public_pilot(_load_json(output_dir / "source-pilot" / "latest.json"))
     source_feed = build_public_source_feed(_load_json(output_dir / "source-pilot" / "latest.json"))
     health["source_pilot"] = pilot
