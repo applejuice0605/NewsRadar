@@ -30,6 +30,10 @@ class DashboardMonitorTests(unittest.TestCase):
         card = MODULE.build_health_card(state, {}, datetime(2026, 10, 23, 22))
         self.assertEqual(card['schema'], '2.0')
         self.assertEqual(card['header']['template'], 'red')
+        columns = card['body']['elements'][1]['columns']
+        self.assertEqual(len(columns), 3)
+        self.assertTrue(all(column['width'] == 'weighted' and column['weight'] == 1 for column in columns))
+        self.assertEqual(card['body']['elements'][1]['horizontal_spacing'], '12px')
         config = {'NEWSRADAR_HEALTH_WEBHOOK_URL': 'https://open.larksuite.com/open-apis/bot/v2/hook/test', 'NEWSRADAR_HEALTH_WEBHOOK_SECRET': 'test-secret'}
         with patch.object(MODULE, 'env_file', return_value=config), patch.object(MODULE.time, 'time', return_value=123456), patch.object(MODULE.urllib.request, 'urlopen') as send:
             send.return_value.__enter__.return_value.read.return_value = b'{"code":0,"data":{}}'

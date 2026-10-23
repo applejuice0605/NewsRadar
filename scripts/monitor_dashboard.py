@@ -43,7 +43,7 @@ def build_health_card(state, runtime, now):
 
     card = {
         'schema': '2.0',
-        'config': {'width_mode': 'compact', 'summary': {'content': 'NewsRadar 健康检查：' + ('正常' if healthy else '需关注')}},
+        'config': {'width_mode': 'fill', 'summary': {'content': 'NewsRadar 健康检查：' + ('正常' if healthy else '需关注')}},
         'header': {'title': {'tag': 'plain_text', 'content': 'NewsRadar 每日健康报告'},
                    'subtitle': {'tag': 'plain_text', 'content': now.strftime('%Y-%m-%d %H:%M') + ' · 北京时间'},
                    'template': 'green' if healthy else 'red'},
@@ -64,15 +64,11 @@ def build_health_card(state, runtime, now):
         ]},
     }
     elements = card['body']['elements']
-    # One physical column owns all three sections, including on desktop clients.
     sections = elements[1:-1]
     card['body']['elements'] = [elements[0], {
         'tag': 'column_set', 'flex_mode': 'none',
-        'columns': [{
-            'tag': 'column', 'width': 'weighted', 'weight': 1,
-            'direction': 'vertical', 'vertical_spacing': '12px',
-            'elements': sections,
-        }],
+        'horizontal_spacing': '12px',
+        'columns': [section['columns'][0] for section in sections],
     }, elements[-1]]
     return card
 
