@@ -43,7 +43,7 @@ def build_health_card(state, runtime, now):
 
     card = {
         'schema': '2.0',
-        'config': {'width_mode': 'fill', 'summary': {'content': 'NewsRadar 健康检查：' + ('正常' if healthy else '需关注')}},
+        'config': {'width_mode': 'default', 'summary': {'content': 'NewsRadar 健康检查：' + ('正常' if healthy else '需关注')}},
         'header': {'title': {'tag': 'plain_text', 'content': 'NewsRadar 每日健康报告'},
                    'subtitle': {'tag': 'plain_text', 'content': now.strftime('%Y-%m-%d %H:%M') + ' · 北京时间'},
                    'template': 'green' if healthy else 'red'},
