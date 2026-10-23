@@ -41,7 +41,7 @@ def build_health_card(state, runtime, now):
                  {'tag': 'markdown', 'content': content},
              ]}]}
 
-    return {
+    card = {
         'schema': '2.0',
         'config': {'width_mode': 'compact', 'summary': {'content': 'NewsRadar 健康检查：' + ('正常' if healthy else '需关注')}},
         'header': {'title': {'tag': 'plain_text', 'content': 'NewsRadar 每日健康报告'},
@@ -63,6 +63,18 @@ def build_health_card(state, runtime, now):
             {'tag': 'markdown', 'content': '[查看完整运行状态](https://preview.newsradar.ccwu.cc/status)'},
         ]},
     }
+    elements = card['body']['elements']
+    # One physical column owns all three sections, including on desktop clients.
+    sections = elements[1:-1]
+    card['body']['elements'] = [elements[0], {
+        'tag': 'column_set', 'flex_mode': 'none',
+        'columns': [{
+            'tag': 'column', 'width': 'weighted', 'weight': 1,
+            'direction': 'vertical', 'vertical_spacing': '12px',
+            'elements': sections,
+        }],
+    }, elements[-1]]
+    return card
 
 
 def send_health_card(card, idempotency_key):
