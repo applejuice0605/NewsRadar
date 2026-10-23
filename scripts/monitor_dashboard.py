@@ -15,8 +15,11 @@ REPO = Path(__file__).resolve().parents[1]
 DATA = Path(os.environ.get('NEWSRADAR_PRODUCTION_DIR', '/Users/bruce/Coding/NewsRadar-production'))
 
 
-def fetch_private(url, token, method='GET'):
-    request = urllib.request.Request(url, method=method, headers={'Authorization': 'Basic ' + token, 'User-Agent': 'Mozilla/5.0 NewsRadarHealth/1.0', 'Cache-Control': 'no-cache'})
+def fetch_private(url, token, method='GET', byte_range=None):
+    headers = {'Authorization': 'Basic ' + token, 'User-Agent': 'Mozilla/5.0 NewsRadarHealth/1.0', 'Cache-Control': 'no-cache'}
+    if byte_range:
+        headers['Range'] = byte_range
+    request = urllib.request.Request(url, method=method, headers=headers)
     return urllib.request.urlopen(request, timeout=45)
 
 
@@ -70,8 +73,8 @@ def main():
         audio_url = str(remote_podcast.get('audio_url', ''))
         if not audio_url.startswith('/audio/') or '..' in audio_url:
             raise ValueError('invalid audio path')
-        with fetch_private('https://preview.newsradar.ccwu.cc' + audio_url, token, 'HEAD') as response:
-            audio_ok = response.status == 200 and int(response.headers.get('Content-Length', '0')) > 1000
+        with fetch_private('https://preview.newsradar.ccwu.cc' + audio_url, token, byte_range='bytes=0-31') as response:
+            audio_ok = response.status in (200, 206) and response.headers.get('Content-Type', '').startswith('audio/') and len(response.read(32)) == 32
         state['podcast']['online_verified'] = audio_ok and remote_podcast.get('date') == podcast.get('date')
     except Exception:
         state['podcast']['online_verified'] = False
