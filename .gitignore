@@ -17,6 +17,7 @@ Thumbs.db
 *.log
 .env
 .env.local
+.health.env.local
 test_ai.py
 
 # Prepared Cloudflare deployment artifacts

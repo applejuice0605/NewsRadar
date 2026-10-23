@@ -20,10 +20,13 @@ Feishu news delivery status. `--notify` sends a manual verification report.
 Before 22:00, that verification does not suppress the nightly report.
 
 Preview credentials are read from `.preview-auth.local`.
-Health cards use the lark-cli bot identity and are sent only to
-`oc_e09cc255d86e71d627ddcedd0510c01a`. The production Feishu news webhook
-is not read or changed by the monitor. lark-cli manages the application
-credentials; no credentials are copied into static assets or logs.
+Health cards use a dedicated group webhook with HMAC-SHA256 signature
+verification. Set `NEWSRADAR_HEALTH_WEBHOOK_URL` and
+`NEWSRADAR_HEALTH_WEBHOOK_SECRET` in `.health.env.local` (mode 600, Git ignored).
+The production Feishu news webhook is not read or changed by the monitor.
+No credentials are copied into static assets or logs. Webhooks have no API
+idempotency guarantee; the local daily delivery marker prevents routine
+duplicates, but a crash after delivery and before saving may duplicate a card.
 Podcast expectation: yesterday is valid before 22:00; today's episode is
 required after 22:00. News pushes skipped for no matches are not failures.
 

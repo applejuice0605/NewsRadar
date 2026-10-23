@@ -2,10 +2,14 @@
 """Refresh preview and send a verified daily Feishu health report."""
 import argparse
 import base64
+import hashlib
+import hmac
 import json
 import os
 import re
 import subprocess
+import time
+import urllib.error
 import urllib.request
 from datetime import datetime
 from pathlib import Path
@@ -13,7 +17,7 @@ from zoneinfo import ZoneInfo
 
 REPO = Path(__file__).resolve().parents[1]
 DATA = Path(os.environ.get('NEWSRADAR_PRODUCTION_DIR', '/Users/bruce/Coding/NewsRadar-production'))
-HEALTH_CHAT_ID = 'oc_e09cc255d86e71d627ddcedd0510c01a'
+HEALTH_CONFIG = REPO / '.health.env.local'
 
 
 def build_health_card(state, runtime, now):
@@ -57,18 +61,25 @@ def build_health_card(state, runtime, now):
 
 
 def send_health_card(card, idempotency_key):
-    result = subprocess.run([
-        '/opt/homebrew/bin/lark-cli', 'im', '+messages-send', '--as', 'bot',
-        '--chat-id', HEALTH_CHAT_ID, '--msg-type', 'interactive',
-        '--content', json.dumps(card, ensure_ascii=False),
-        '--idempotency-key', idempotency_key,
-    ], capture_output=True, text=True, timeout=60)
-    if result.returncode:
-        raise RuntimeError('Health card delivery failed: ' + result.stderr)
-    response = json.loads(result.stdout)
-    if response.get('ok') is not True:
-        raise RuntimeError('Health card delivery not confirmed')
-    return response.get('data', {})
+    config = env_file(HEALTH_CONFIG)
+    webhook = config.get('NEWSRADAR_HEALTH_WEBHOOK_URL', '')
+    secret = config.get('NEWSRADAR_HEALTH_WEBHOOK_SECRET', '')
+    if not webhook.startswith(('https://open.larksuite.com/open-apis/bot/v2/hook/', 'https://open.feishu.cn/open-apis/bot/v2/hook/')) or not secret:
+        raise RuntimeError('Dedicated health webhook or signature secret is missing')
+    timestamp = str(int(time.time()))
+    signature = base64.b64encode(hmac.new(
+        (timestamp + '\n' + secret).encode(), b'', hashlib.sha256,
+    ).digest()).decode()
+    payload = {'timestamp': timestamp, 'sign': signature, 'msg_type': 'interactive', 'card': card}
+    request = urllib.request.Request(webhook, data=json.dumps(payload, ensure_ascii=False).encode(), headers={'Content-Type': 'application/json'})
+    try:
+        with urllib.request.urlopen(request, timeout=30) as response:
+            answer = json.load(response)
+    except (urllib.error.URLError, ValueError):
+        raise RuntimeError('Health webhook request failed; URL and secret redacted') from None
+    if answer.get('code', answer.get('StatusCode', -1)) != 0:
+        raise RuntimeError('Health card rejected, code=' + str(answer.get('code', answer.get('StatusCode'))))
+    return answer.get('data') or {}
 
 
 def fetch_private(url, token, method='GET', byte_range=None):
@@ -143,7 +154,7 @@ def main():
         card = build_health_card(state, runtime, now)
         key = 'nr-health-' + (now.strftime('%Y%m%d-%H%M%S') if args.notify else now.strftime('%Y%m%d'))
         receipt = send_health_card(card, key)
-        state['health_chat_id'] = HEALTH_CHAT_ID
+        state['health_channel'] = 'dedicated_signed_webhook'
         state['health_message_id'] = receipt.get('message_id')
         state['last_daily_sent'] = now.date().isoformat() if now.hour >= 22 else None
         state_path.write_text(json.dumps(state, ensure_ascii=False, indent=2))
