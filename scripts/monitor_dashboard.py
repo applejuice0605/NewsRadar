@@ -31,14 +31,19 @@ def build_health_card(state, runtime, now):
     labels = {'success': '成功', 'failed': '失败', 'skipped': '本轮无需推送', 'disabled': '已禁用', 'unknown': '未知'}
 
     def group(title, content):
+        color = {'新闻看板与采集': 'blue', 'AI 播客': 'turquoise', '飞书新闻推送': 'orange'}[title]
         return {'tag': 'column_set', 'flex_mode': 'none', 'columns': [
             {'tag': 'column', 'width': 'weighted', 'weight': 1,
+             'direction': 'vertical', 'vertical_spacing': '8px',
              'background_style': 'grey-50', 'padding': '12px',
-             'elements': [{'tag': 'markdown', 'content': '**' + title + '**\n' + content}]}]}
+             'elements': [
+                 {'tag': 'markdown', 'content': "<text_tag color='" + color + "'>" + title + '</text_tag>'},
+                 {'tag': 'markdown', 'content': content},
+             ]}]}
 
     return {
         'schema': '2.0',
-        'config': {'width_mode': 'default', 'summary': {'content': 'NewsRadar 健康检查：' + ('正常' if healthy else '需关注')}},
+        'config': {'width_mode': 'compact', 'summary': {'content': 'NewsRadar 健康检查：' + ('正常' if healthy else '需关注')}},
         'header': {'title': {'tag': 'plain_text', 'content': 'NewsRadar 每日健康报告'},
                    'subtitle': {'tag': 'plain_text', 'content': now.strftime('%Y-%m-%d %H:%M') + ' · 北京时间'},
                    'template': 'green' if healthy else 'red'},
