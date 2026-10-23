@@ -20,6 +20,18 @@ DATA = Path(os.environ.get('NEWSRADAR_PRODUCTION_DIR', '/Users/bruce/Coding/News
 HEALTH_CONFIG = REPO / '.health.env.local'
 
 
+def display_china_time(value):
+    if not value:
+        return '未知'
+    try:
+        parsed = datetime.fromisoformat(str(value).replace('Z', '+00:00'))
+        if parsed.tzinfo is None:
+            parsed = parsed.replace(tzinfo=ZoneInfo('Asia/Shanghai'))
+        return parsed.astimezone(ZoneInfo('Asia/Shanghai')).strftime('%Y-%m-%d %H:%M:%S')
+    except ValueError:
+        return '未知'
+
+
 def build_health_card(state, runtime, now):
     notification = runtime.get('notification', {})
     collection = runtime.get('collection', {})
@@ -45,21 +57,21 @@ def build_health_card(state, runtime, now):
         'schema': '2.0',
         'config': {'width_mode': 'default', 'summary': {'content': 'NewsRadar 健康检查：' + ('正常' if healthy else '需关注')}},
         'header': {'title': {'tag': 'plain_text', 'content': 'NewsRadar 每日健康报告'},
-                   'subtitle': {'tag': 'plain_text', 'content': now.strftime('%Y-%m-%d %H:%M') + ' · 北京时间'},
+                   'subtitle': {'tag': 'plain_text', 'content': now.astimezone(ZoneInfo('Asia/Shanghai')).strftime('%Y-%m-%d %H:%M') + ' · 以下时间均为北京时间'},
                    'template': 'green' if healthy else 'red'},
         'body': {'direction': 'vertical', 'vertical_spacing': '12px', 'elements': [
             {'tag': 'markdown', 'text_size': 'heading-2', 'content': '**' + ('系统运行正常' if healthy else '系统存在需要关注的项目') + '**'},
             group('新闻看板与采集',
                   '内测部署：' + ('成功' if state.get('deploy_success') else '失败') +
                   '\n线上数据：' + ('正常' if state.get('website_fresh') else '异常/过期') +
-                  ' · 距采集 ' + str(state.get('website_age_minutes', '未知')) + ' 分钟' +
-                  '\n最近采集：' + str(collection.get('last_completed_at', '未知')) +
+                  '\n距上次采集完成：' + (str(int(float(state['website_age_minutes']) + 0.5)) + ' 分钟' if state.get('website_age_minutes') is not None else '未知') +
+                  '\n上次采集完成：' + display_china_time(collection.get('last_completed_at')) +
                   '\n间隔后补跑：' + ('是' if collection.get('catch_up') else '否')),
             group('AI 播客', '生成状态：' + labels.get(podcast.get('status'), '未知') +
                   '\n最新一期：' + str(podcast.get('date', '未知')) +
                   '\n线上音频：' + ('可访问' if podcast.get('online_verified') else '验证失败')),
             group('飞书新闻推送', '状态：' + labels.get(notification.get('status'), '未知') +
-                  '\n最近成功：' + str(notification.get('last_success_at', '未知'))),
+                  '\n上次推送成功：' + display_china_time(notification.get('last_success_at'))),
             {'tag': 'markdown', 'content': '[查看完整运行状态](https://preview.newsradar.ccwu.cc/status)'},
         ]},
     }

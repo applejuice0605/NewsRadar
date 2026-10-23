@@ -15,6 +15,15 @@ SPEC.loader.exec_module(MODULE)
 
 
 class DashboardMonitorTests(unittest.TestCase):
+    def test_times_are_converted_to_beijing_and_elapsed_minutes_are_clear(self):
+        self.assertEqual(MODULE.display_china_time('2026-10-23T09:21:40Z'), '2026-10-23 17:21:40')
+        self.assertEqual(MODULE.display_china_time('2026-10-23T17:21:40+08:00'), '2026-10-23 17:21:40')
+        self.assertEqual(MODULE.display_china_time(None), '未知')
+        card = MODULE.build_health_card({'website_age_minutes': 61.6}, {}, datetime(2026, 10, 23, 22))
+        rendered = json.dumps(card, ensure_ascii=False)
+        self.assertIn('距上次采集完成：62 分钟', rendered)
+        self.assertNotIn('61.6', rendered)
+
     def test_env_file_parses_export_without_evaluating_shell(self):
         with tempfile.TemporaryDirectory() as directory:
             path = Path(directory) / 'env'
