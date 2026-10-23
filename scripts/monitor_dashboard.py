@@ -13,6 +13,62 @@ from zoneinfo import ZoneInfo
 
 REPO = Path(__file__).resolve().parents[1]
 DATA = Path(os.environ.get('NEWSRADAR_PRODUCTION_DIR', '/Users/bruce/Coding/NewsRadar-production'))
+HEALTH_CHAT_ID = 'oc_e09cc255d86e71d627ddcedd0510c01a'
+
+
+def build_health_card(state, runtime, now):
+    notification = runtime.get('notification', {})
+    collection = runtime.get('collection', {})
+    podcast = state.get('podcast', {})
+    healthy = (state.get('deploy_success') and state.get('website_fresh')
+               and podcast.get('status') == 'success'
+               and notification.get('status') not in ('failed', 'disabled', 'unknown')
+               and collection.get('success') is True)
+    labels = {'success': '成功', 'failed': '失败', 'skipped': '本轮无需推送', 'disabled': '已禁用', 'unknown': '未知'}
+
+    def group(title, content):
+        return {'tag': 'column_set', 'flex_mode': 'none', 'columns': [
+            {'tag': 'column', 'width': 'weighted', 'weight': 1,
+             'background_style': 'grey-50', 'padding': '12px',
+             'elements': [{'tag': 'markdown', 'content': '**' + title + '**\n' + content}]}]}
+
+    return {
+        'schema': '2.0',
+        'config': {'width_mode': 'default', 'summary': {'content': 'NewsRadar 健康检查：' + ('正常' if healthy else '需关注')}},
+        'header': {'title': {'tag': 'plain_text', 'content': 'NewsRadar 每日健康报告'},
+                   'subtitle': {'tag': 'plain_text', 'content': now.strftime('%Y-%m-%d %H:%M') + ' · 北京时间'},
+                   'template': 'green' if healthy else 'red'},
+        'body': {'direction': 'vertical', 'vertical_spacing': '12px', 'elements': [
+            {'tag': 'markdown', 'text_size': 'heading-2', 'content': '**' + ('系统运行正常' if healthy else '系统存在需要关注的项目') + '**'},
+            group('新闻看板与采集',
+                  '内测部署：' + ('成功' if state.get('deploy_success') else '失败') +
+                  '\n线上数据：' + ('正常' if state.get('website_fresh') else '异常/过期') +
+                  ' · 距采集 ' + str(state.get('website_age_minutes', '未知')) + ' 分钟' +
+                  '\n最近采集：' + str(collection.get('last_completed_at', '未知')) +
+                  '\n间隔后补跑：' + ('是' if collection.get('catch_up') else '否')),
+            group('AI 播客', '生成状态：' + labels.get(podcast.get('status'), '未知') +
+                  '\n最新一期：' + str(podcast.get('date', '未知')) +
+                  '\n线上音频：' + ('可访问' if podcast.get('online_verified') else '验证失败')),
+            group('飞书新闻推送', '状态：' + labels.get(notification.get('status'), '未知') +
+                  '\n最近成功：' + str(notification.get('last_success_at', '未知'))),
+            {'tag': 'markdown', 'content': '[查看完整运行状态](https://preview.newsradar.ccwu.cc/status)'},
+        ]},
+    }
+
+
+def send_health_card(card, idempotency_key):
+    result = subprocess.run([
+        '/opt/homebrew/bin/lark-cli', 'im', '+messages-send', '--as', 'bot',
+        '--chat-id', HEALTH_CHAT_ID, '--msg-type', 'interactive',
+        '--content', json.dumps(card, ensure_ascii=False),
+        '--idempotency-key', idempotency_key,
+    ], capture_output=True, text=True, timeout=60)
+    if result.returncode:
+        raise RuntimeError('Health card delivery failed: ' + result.stderr)
+    response = json.loads(result.stdout)
+    if response.get('ok') is not True:
+        raise RuntimeError('Health card delivery not confirmed')
+    return response.get('data', {})
 
 
 def fetch_private(url, token, method='GET', byte_range=None):
@@ -84,26 +140,11 @@ def main():
     state_path.write_text(json.dumps(state, ensure_ascii=False, indent=2))
     if args.notify or (now.hour >= 22 and state.get('last_daily_sent') != now.date().isoformat()):
         runtime = read_json(DATA / 'TrendRadar/output/meta/runtime_health.json')
-        notification = runtime.get('notification', {})
-        text = '\n'.join([
-            'NewsRadar 每日健康检查 · ' + now.strftime('%Y-%m-%d %H:%M'),
-            '内测部署：' + ('成功' if state['deploy_success'] else '失败'),
-            '网站新闻：' + ('正常' if state['website_fresh'] else '异常/过期') + '，距最近采集 ' + str(state.get('website_age_minutes')) + ' 分钟',
-            '最近采集：' + str(runtime.get('collection', {}).get('last_completed_at')),
-            '睡眠/调度间隔后补跑：' + str(runtime.get('collection', {}).get('catch_up')),
-            'AI 播客：' + state['podcast']['status'] + '，最新日期 ' + str(podcast.get('date')),
-            '飞书新闻推送：' + str(notification.get('status')) + '，最近成功 ' + str(notification.get('last_success_at')),
-            'https://preview.newsradar.ccwu.cc/status',
-        ])
-        secrets = env_file(DATA / 'TrendRadar/.env.local')
-        webhook = secrets.get('FEISHU_WEBHOOK_URL', '')
-        if not webhook:
-            raise RuntimeError('FEISHU_WEBHOOK_URL is missing')
-        request = urllib.request.Request(webhook, data=json.dumps({'msg_type': 'text', 'content': {'text': text}}).encode(), headers={'Content-Type': 'application/json'})
-        with urllib.request.urlopen(request, timeout=30) as response:
-            answer = json.load(response)
-        if answer.get('code', answer.get('StatusCode', -1)) != 0:
-            raise RuntimeError('Feishu did not confirm delivery')
+        card = build_health_card(state, runtime, now)
+        key = 'nr-health-' + (now.strftime('%Y%m%d-%H%M%S') if args.notify else now.strftime('%Y%m%d'))
+        receipt = send_health_card(card, key)
+        state['health_chat_id'] = HEALTH_CHAT_ID
+        state['health_message_id'] = receipt.get('message_id')
         state['last_daily_sent'] = now.date().isoformat() if now.hour >= 22 else None
         state_path.write_text(json.dumps(state, ensure_ascii=False, indent=2))
         print('[health] Feishu daily report delivered')

@@ -19,8 +19,11 @@ podcast generation and online availability, catch-up flag, and the latest
 Feishu news delivery status. `--notify` sends a manual verification report.
 Before 22:00, that verification does not suppress the nightly report.
 
-Credentials are read from `.preview-auth.local` and the production
-`TrendRadar/.env.local`, never copied into static assets or logs.
+Preview credentials are read from `.preview-auth.local`.
+Health cards use the lark-cli bot identity and are sent only to
+`oc_e09cc255d86e71d627ddcedd0510c01a`. The production Feishu news webhook
+is not read or changed by the monitor. lark-cli manages the application
+credentials; no credentials are copied into static assets or logs.
 Podcast expectation: yesterday is valid before 22:00; today's episode is
 required after 22:00. News pushes skipped for no matches are not failures.
 
