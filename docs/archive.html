@@ -163,7 +163,7 @@
         <button class="button" type="button" id="showLatest">最新日期</button>
         <label>
           选择日期
-          <input type="date" id="dateInput" min="2025-11-14" max="2026-10-28">
+          <input type="date" id="dateInput" min="2025-11-14" max="2026-10-29">
         </label>
       </div>
     </header>
@@ -176,7 +176,18 @@
       <div class="calendar-grid" id="calendarGrid"></div>
     </section>
     <div class="no-result" id="noResult">这一天暂无报告。黄色日期代表有历史数据。</div>
-    <div id="archiveList"><section class="archive-card" data-date="2026-10-28">
+    <div id="archiveList"><section class="archive-card" data-date="2026-10-29">
+                <div>
+                    <h2>2026-10-29</h2>
+                    <p>1 份报告</p>
+                </div>
+                <a class="primary-link" href="/reports/2026-10-29/00-56.html">查看 当天汇总</a>
+                <details>
+                    <summary>展开当天所有快照</summary>
+                    <ul><li><a href="/reports/2026-10-29/00-56.html">00-56</a></li></ul>
+                </details>
+            </section>
+<section class="archive-card" data-date="2026-10-28">
                 <div>
                     <h2>2026-10-28<span class="ai-badge">AI 分析</span></h2>
                     <p>25 份报告</p>
@@ -610,7 +621,7 @@
             </section></div>
   </main>
   <script>
-    const availableDates = new Set(["2026-10-28", "2026-10-27", "2026-10-26", "2026-10-25", "2026-10-24", "2026-10-23", "2026-10-22", "2026-10-21", "2026-10-20", "2026-10-19", "2026-10-18", "2026-10-17", "2026-10-16", "2026-10-15", "2026-10-14", "2026-10-13", "2026-10-12", "2025-11-24", "2025-11-23", "2025-11-21", "2025-11-20", "2025-11-19", "2025-11-14"]);
+    const availableDates = new Set(["2026-10-29", "2026-10-28", "2026-10-27", "2026-10-26", "2026-10-25", "2026-10-24", "2026-10-23", "2026-10-22", "2026-10-21", "2026-10-20", "2026-10-19", "2026-10-18", "2026-10-17", "2026-10-16", "2026-10-15", "2026-10-14", "2026-10-13", "2026-10-12", "2025-11-24", "2025-11-23", "2025-11-21", "2025-11-20", "2025-11-19", "2025-11-14"]);
     const sortedDates = Array.from(availableDates).sort();
     const input = document.getElementById('dateInput');
     const cards = Array.from(document.querySelectorAll('.archive-card'));
