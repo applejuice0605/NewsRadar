@@ -40,3 +40,13 @@ class NewsQualityTests(unittest.TestCase):
         self.assertEqual(result['selection_rate_percent'], 33.3)
         self.assertEqual(result['peripheral_count'], 1)
         self.assertIsNone(build_quality_metrics([], day)['mean_relevance_percent'])
+
+    def test_existing_cached_classifications_are_filtered(self):
+        from trendradar.ai.filter_pipeline import AIFilterPipeline
+        pipeline = object.__new__(AIFilterPipeline)
+        pipeline._priority_sort_enabled = False
+        result = pipeline._build_filter_result([
+            {'tag': '推理', 'title': '走私AI芯片', 'relevance_score': .99},
+            {'tag': '推理', 'title': 'vLLM推理吞吐优化实测', 'relevance_score': .9},
+        ], [{'tag': '推理'}], 2)
+        self.assertEqual([item['title'] for group in result.tags for item in group['items']], ['vLLM推理吞吐优化实测'])
