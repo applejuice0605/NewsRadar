@@ -14,6 +14,7 @@ from pathlib import Path
 from typing import Any, Callable, Dict, List, Optional
 
 from trendradar.ai.client import AIClient
+from trendradar.ai.news_quality import peripheral_reason
 from trendradar.ai.prompt_loader import load_prompt_template
 
 
@@ -495,7 +496,7 @@ class AIFilter:
             if best_tag_id is not None:
                 title_text = title_map.get(news_id, "")
                 tag_text = tag_name_map.get(best_tag_id, "")
-                if self._should_reject_ambiguous_ai_match(title_text, tag_text):
+                if peripheral_reason(title_text) or self._should_reject_ambiguous_ai_match(title_text, tag_text):
                     if self.debug:
                         print(
                             f"[AI筛选][DEBUG] 跳过缺少 AI 直接证据的泛科技标题: "

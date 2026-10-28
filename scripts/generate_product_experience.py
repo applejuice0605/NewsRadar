@@ -15,7 +15,7 @@ from pathlib import Path
 from typing import Any
 from urllib.parse import parse_qsl, urlencode, urlsplit, urlunsplit
 
-from generate_site_insights import load_articles
+from generate_site_insights import load_articles, peripheral_reason
 
 
 REPO_DIR = Path(__file__).resolve().parents[1]
@@ -293,9 +293,11 @@ def build_experience(repo_dir: Path, now: datetime | None = None) -> dict[str, A
     included_ids.update(article_id for event in events for article_id in event["article_ids"])
     records = [record for record in all_records if record["id"] in included_ids]
     records_by_id = {record["id"]: record for record in records}
-    global_important = sorted(today, key=lambda item: item["score"]["total"], reverse=True)[:8]
+    recommended = [record for record in today if not peripheral_reason(record["title"])
+                   and max((tag["relevance"] for tag in record["tags"]), default=0) >= 0.7]
+    global_important = sorted(recommended, key=lambda item: item["score"]["total"], reverse=True)[:8]
     personalized = sorted(
-        today,
+        recommended,
         key=lambda item: (item["score"]["components"]["interest"], item["score"]["total"]),
         reverse=True,
     )[:8]

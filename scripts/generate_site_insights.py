@@ -5,6 +5,7 @@ from __future__ import annotations
 
 import argparse
 import html
+import importlib.util
 import json
 import math
 import os
@@ -21,6 +22,10 @@ from zoneinfo import ZoneInfo
 
 
 REPO_DIR = Path(__file__).resolve().parents[1]
+_quality_spec = importlib.util.spec_from_file_location("news_quality", REPO_DIR / "TrendRadar/trendradar/ai/news_quality.py")
+_quality_module = importlib.util.module_from_spec(_quality_spec)
+_quality_spec.loader.exec_module(_quality_module)
+peripheral_reason = _quality_module.peripheral_reason
 DEFAULT_SITE_DIR = REPO_DIR / "docs"
 RANGES = (1, 7, 30, 90)
 TOP_ARTICLES_LIMIT = 8
@@ -673,6 +678,7 @@ def render_status_html(health: dict[str, Any], pilot: dict[str, Any]) -> str:
     schedule = health["schedule"]
     overall = str(health["overall_status"])
     podcast = health.get("podcast", {})
+    quality = health.get("quality", {})
     cards = [
         ("采集", "COLLECT", _status_label("success" if collection["success"] is True else "failed" if collection["success"] is False else "unknown"), _status_class("success" if collection["success"] is True else "failed" if collection["success"] is False else "unknown"), [("最近开始", collection["last_started_at"]), ("最近完成", collection["last_completed_at"]), ("耗时", _display(collection["duration_seconds"], " 秒")), ("成功来源", collection["source_success"]), ("失败来源", collection["source_failed"]), ("条目", collection["item_count"]), ("间隔", _display(collection["gap_minutes"], " 分钟")), ("补采", _display(collection["catch_up"]))]),
         ("飞书推送", "FEISHU", _status_label(notification["status"]), _status_class(notification["status"]), [("最近尝试", notification["last_attempt_at"]), ("最近成功", notification["last_success_at"]), ("原因", notification["reason"])]),
@@ -680,6 +686,14 @@ def render_status_html(health: dict[str, Any], pilot: dict[str, Any]) -> str:
         ("发布", "PUBLISH", _status_label(publish["status"]), _status_class(publish["status"]), [("最近尝试", publish["last_attempt_at"]), ("最近成功", publish["last_success_at"]), ("提交", publish["commit"])]),
         ("调度", "SCHEDULE", "每 %s 分钟" % schedule["interval_minutes"], "good" if schedule["next_expected_at"] else "unknown", [("下次预期", schedule["next_expected_at"])]),
     ]
+    cards[0][4].extend([
+        ("统计日期", quality.get("date")),
+        ("推荐相关度（AI自评均分）", _display(quality.get("mean_relevance_percent"), "%")),
+        ("有效推荐占采集比例", _display(quality.get("selection_rate_percent"), "%")),
+        ("推荐 / 原始采集", str(quality.get("accepted_count", 0)) + " / " + str(quality.get("collected_count", 0))),
+        ("已识别周边标题", quality.get("peripheral_count", 0)),
+        ("统计口径", "当天按规范化标题去重；AI分数是标题相关性自评，非人工准确率；未分类原始新闻也计入采集分母"),
+    ])
     pilot_labels = {
         "not_configured": ("未启用", "unknown"),
         "observing": ("观察中", "warn"),
@@ -819,6 +833,25 @@ def _atomic_write(path: Path, content: str) -> None:
                 pass
 
 
+def build_quality_metrics(articles, day, minimum=0.7):
+    unique = {}
+    for article in articles:
+        if article["date"] != day:
+            continue
+        title = re.sub(r"\s+", "", article["title"]).casefold()
+        score = max((float(score) for _tag, score in article.get("tags", [])), default=0)
+        if title not in unique or score > unique[title][1]:
+            unique[title] = (article["title"], score)
+    accepted = [score for title, score in unique.values() if score >= minimum and not peripheral_reason(title)]
+    return {
+        "date": day.isoformat(), "collected_count": len(unique), "accepted_count": len(accepted),
+        "mean_relevance_percent": round(sum(accepted) / len(accepted) * 100, 1) if accepted else None,
+        "selection_rate_percent": round(len(accepted) / len(unique) * 100, 1) if unique else None,
+        "peripheral_count": sum(bool(peripheral_reason(title)) for title, _score in unique.values()),
+        "minimum_score": minimum, "basis": "title_only_model_self_score_not_accuracy",
+    }
+
+
 def generate_site_insights(repo_dir: Path, site_dir: Path, now: datetime | None = None) -> tuple[dict[str, Any], dict[str, Any], list[str]]:
     output_dir = repo_dir / "TrendRadar" / "output"
     runtime = _load_json(output_dir / "meta" / "runtime_health.json") or {}
@@ -836,6 +869,7 @@ def generate_site_insights(repo_dir: Path, site_dir: Path, now: datetime | None 
     source_feed = build_public_source_feed(_load_json(output_dir / "source-pilot" / "latest.json"))
     health["source_pilot"] = pilot
     articles, skipped = load_articles(output_dir)
+    health["quality"] = build_quality_metrics(articles, expected.date())
     trends = build_trends(articles, now=now)
     outputs = {
         site_dir / "health.json": _json_text(health),

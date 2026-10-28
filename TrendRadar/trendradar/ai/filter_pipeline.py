@@ -9,6 +9,7 @@ AI 筛选流水线
 from typing import Any, Callable, Dict, List, Optional
 
 from trendradar.ai.filter import AIFilter, AIFilterResult
+from trendradar.ai.news_quality import peripheral_reason
 from trendradar.utils.time import (
     DEFAULT_TIMEZONE,
     convert_time_for_display,
@@ -413,6 +414,8 @@ class AIFilterPipeline:
         seen_titles: Dict[str, set] = {}
 
         for r in raw_results:
+            if peripheral_reason(r.get("title", "")):
+                continue
             tag_name = r["tag"]
             if tag_name not in tag_groups:
                 raw_priority = r.get("tag_priority", tag_priority_map.get(tag_name, 9999))
