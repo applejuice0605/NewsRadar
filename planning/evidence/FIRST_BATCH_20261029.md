@@ -60,3 +60,29 @@ git diff --check
 ## 回退
 
 本轮改动保留在 staging，正式运行目录未替换。若需要回退，应先另存后续改动，再按基线提交选择性恢复对应源码；不要直接覆盖当前目录，更不要覆盖原始数据库或本地密钥。
+
+
+## 最终线上复核
+
+修复后内测 Worker 版本 `16501236-060c-4c5a-a6b0-aea4992a7345`：
+
+- `/cloud-health.json` HTTP 200，`status=healthy`，`issues={}`，`scheduler_enabled=false`。成功读取采集与音频元数据，以及音频前 32 字节。该请求不发送飞书消息。
+- `/analysis-preview.html` HTTP 200，8 条可点击依据链接；该页是独立内测样本，不替换生产日报。
+- `site-features.json` 五项内测开关全部为 true。
+- 正式首页指纹前后完全一致；未部署 main、未替换 production 采集器。
+- 代码已推送 staging；首个实现提交 `abd5964`，复核修复提交 `fcfa5b8`。
+- 自动化回归最终 74 Python + 11 Node 全部通过，40 条规则样本通过。
+
+### 截图
+
+桌面播放器日期标签：
+
+![桌面播放器时间标签](podcast-dates-desktop.png)
+
+390px 小屏（滚动后的播放器标签）：
+
+![小屏播放器时间标签](podcast-dates-mobile.png)
+
+真实模型依据分析：
+
+![AI 分析及来源链接](analysis-evidence-desktop.png)

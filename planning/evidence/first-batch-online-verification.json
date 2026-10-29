@@ -1,0 +1,65 @@
+{
+  "/build-info.json": {
+    "status": 200,
+    "bytes": 328,
+    "data": {
+      "environment": "preview",
+      "generated_at": "2026-10-29T14:57:18+08:00",
+      "git_branch": "staging",
+      "git_commit": "abd5964dd3a6cd9e1fc7eade4107c0164e1b874b",
+      "git_commit_short": "abd5964dd3a6",
+      "data_branch": "main",
+      "data_commit": "847e0bea0a0392712630d4fabff75ba36fd96e34",
+      "data_commit_short": "847e0bea0a03"
+    }
+  },
+  "/cloud-health.json": {
+    "status": 200,
+    "bytes": 389,
+    "data": {
+      "status": "healthy",
+      "issues": {},
+      "details": [
+        "上次采集完成：2026-10-29 14:10:24；距今 48 分钟",
+        "音频要求日期：2026-10-28（上海时间 22:00 起要求当天）",
+        "音频日期：2026-10-28",
+        "音频生成：2026-10-28 20:48:46",
+        "音频资源：已验证，读取 32 字节"
+      ],
+      "checked_at": 1793257094702,
+      "diagnostics": {},
+      "scheduler_enabled": false,
+      "last_scheduled_check": null
+    }
+  },
+  "/analysis-preview.html": {
+    "status": 200,
+    "bytes": 9159,
+    "evidence_links": 8
+  },
+  "/assets/report-speech.js": {
+    "status": 200,
+    "bytes": 6990,
+    "three_time_labels": true
+  },
+  "/site-features.json": {
+    "status": 200,
+    "bytes": 156,
+    "data": {
+      "environment": "preview",
+      "features": {
+        "speech": true,
+        "trends": true,
+        "status": true,
+        "sources": true,
+        "experience": true
+      }
+    }
+  },
+  "/status": {
+    "status": 200,
+    "bytes": 9875,
+    "no_iso_timestamps": true
+  },
+  "production_unchanged": true
+}
