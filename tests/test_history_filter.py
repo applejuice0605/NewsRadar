@@ -8,7 +8,7 @@ from filter_report_history import clean_report, Document
 
 class HistoryFilterTests(unittest.TestCase):
     def test_removes_peripheral_nodes_and_repairs_counts_without_touching_script(self):
-        source = '''<html><body><script>const x = "<div>keep script</div>";</script>
+        source = '''<html><body><script>const x = "<div>keep script</div>"; const end = "</body>";</script>
         <button class="tab-btn" data-tab-index="all">全部<span class="tab-count">2</span></button>
         <button class="tab-btn" data-tab-index="0">推理<span class="tab-count">2</span></button>
         <div class="word-group" data-tab-index="0"><span class="word-count">2 条</span>
@@ -19,6 +19,7 @@ class HistoryFilterTests(unittest.TestCase):
         self.assertEqual(count, 1)
         self.assertNotIn('走私AI芯片', cleaned)
         self.assertIn('const x = "<div>keep script</div>";', cleaned)
+        self.assertIn('const end = "</body>";</script>', cleaned)
         self.assertIn('class="word-count">1 条', cleaned)
         self.assertIn('class="tab-count">1', cleaned)
         self.assertIn('class="news-number">1', cleaned)

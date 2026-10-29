@@ -1,4 +1,5 @@
 """Conservative title-level exclusions; raw collection remains archived."""
+from __future__ import annotations
 import re
 
 
