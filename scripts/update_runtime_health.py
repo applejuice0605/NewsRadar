@@ -185,6 +185,23 @@ def finish_event(state: dict[str, Any], exit_code: int, log_path: Path | None) -
     if notification_result["status"] == "success":
         notification["last_success_at"] = iso_time(now)
     notification.update(notification_result)
+    if log_path and log_path.is_file():
+        run_text = log_path.read_text(encoding='utf-8', errors='replace')
+        if '跳过通知：增量模式下未检测到匹配的新闻和RSS' in run_text:
+            # This is a measured zero-candidate run, not an inferred delivery success.
+            metrics_path = OUTPUT_DIR / 'meta/delivery_dedup.json'
+            try:
+                metrics = json.loads(metrics_path.read_text(encoding='utf-8'))
+            except (OSError, ValueError):
+                metrics = {'accounts': {}}
+            metrics.setdefault('accounts', {})['no_candidates'] = {
+                'measured_at': iso_time(now), 'candidate_count': 0,
+                'delivered_blocked_count': 0, 'delivery_status': 'skipped_no_candidates',
+            }
+            metrics_path.parent.mkdir(parents=True, exist_ok=True)
+            temporary = metrics_path.with_suffix('.tmp')
+            temporary.write_text(json.dumps(metrics, ensure_ascii=False, indent=2))
+            temporary.replace(metrics_path)
     state["updated_at"] = iso_time(now)
 
 
