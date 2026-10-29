@@ -32,6 +32,15 @@ def display_china_time(value):
         return '未知'
 
 
+def matching_online_episode(remote, collector_date, expected_date, today):
+    value=remote.get('date')
+    if not isinstance(value,str): return False
+    try:
+        if datetime.strptime(value,'%Y-%m-%d').date().isoformat()!=value: return False
+    except ValueError: return False
+    return value==collector_date or (remote.get('preview_only') is True and expected_date<=value<=today)
+
+
 def build_health_card(state, runtime, now):
     notification = runtime.get('notification', {})
     collection = runtime.get('collection', {})
@@ -69,7 +78,8 @@ def build_health_card(state, runtime, now):
                   '\n间隔后补跑：' + ('是' if collection.get('catch_up') else '否')),
             group('AI 播客', '生成状态：' + labels.get(podcast.get('status'), '未知') +
                   '\n最新一期：' + str(podcast.get('date', '未知')) +
-                  '\n线上音频：' + ('可访问' if podcast.get('online_verified') else '验证失败')),
+                  '\n线上音频：' + ('可访问' if podcast.get('online_verified') else '验证失败') +
+                  ('\n内测试听日期：' + str(podcast.get('online_date', '未知')) if podcast.get('preview_only') else '')),
             group('飞书新闻推送', '状态：' + labels.get(notification.get('status'), '未知') +
                   '\n上次推送成功：' + display_china_time(notification.get('last_success_at'))),
             {'tag': 'markdown', 'content': '[查看完整运行状态](https://preview.newsradar.ccwu.cc/status)'},
@@ -167,7 +177,12 @@ def main():
             raise ValueError('invalid audio path')
         with fetch_private('https://preview.newsradar.ccwu.cc' + audio_url, token, byte_range='bytes=0-31') as response:
             audio_ok = response.status in (200, 206) and response.headers.get('Content-Type', '').startswith('audio/') and len(response.read(32)) == 32
-        state['podcast']['online_verified'] = audio_ok and remote_podcast.get('date') == podcast.get('date')
+        remote_date = remote_podcast.get('date', '')
+        preview_audio = remote_podcast.get('preview_only') is True
+        same_or_valid_trial = matching_online_episode(remote_podcast, podcast.get('date'), expected_date, now.date().isoformat())
+        state['podcast']['online_verified'] = audio_ok and same_or_valid_trial
+        state['podcast']['online_date'] = remote_date
+        state['podcast']['preview_only'] = preview_audio
     except Exception:
         state['podcast']['online_verified'] = False
     if not state['podcast']['online_verified']:

@@ -1,0 +1,97 @@
+{
+  "paired-eval": {
+    "samples": 24,
+    "model": "openai/MiniMax-M2.5",
+    "caveat": "Codex editorial annotations; not human-adjudicated; underlying headlines not fact-checked",
+    "metrics": {
+      "old": {
+        "tp": 12,
+        "fp": 0,
+        "fn": 0,
+        "tn": 12,
+        "precision": 1.0,
+        "recall": 1.0,
+        "positive_classification_accuracy": 0.9166666666666666,
+        "tag_accuracy": 0.9166666666666666,
+        "false_positive_ids": [],
+        "false_negative_ids": []
+      },
+      "new": {
+        "tp": 12,
+        "fp": 0,
+        "fn": 0,
+        "tn": 12,
+        "precision": 1.0,
+        "recall": 1.0,
+        "positive_classification_accuracy": 0.8333333333333334,
+        "tag_accuracy": 0.8333333333333334,
+        "false_positive_ids": [],
+        "false_negative_ids": []
+      }
+    }
+  },
+  "paired-eval-refined": {
+    "samples": 24,
+    "model": "openai/MiniMax-M2.5",
+    "caveat": "Codex editorial annotations; not human-adjudicated; underlying headlines not fact-checked",
+    "metrics": {
+      "old": {
+        "tp": 12,
+        "fp": 0,
+        "fn": 0,
+        "tn": 12,
+        "precision": 1.0,
+        "recall": 1.0,
+        "positive_classification_accuracy": 0.9166666666666666,
+        "tag_accuracy": 0.9166666666666666,
+        "false_positive_ids": [],
+        "false_negative_ids": []
+      },
+      "new": {
+        "tp": 11,
+        "fp": 0,
+        "fn": 1,
+        "tn": 12,
+        "precision": 1.0,
+        "recall": 0.9166666666666666,
+        "positive_classification_accuracy": 0.9166666666666666,
+        "tag_accuracy": 1.0,
+        "false_positive_ids": [],
+        "false_negative_ids": [
+          6
+        ]
+      }
+    }
+  },
+  "paired-eval-final": {
+    "samples": 24,
+    "model": "openai/MiniMax-M2.5",
+    "caveat": "Codex editorial annotations; not human-adjudicated; underlying headlines not fact-checked",
+    "metrics": {
+      "old": {
+        "tp": 12,
+        "fp": 0,
+        "fn": 0,
+        "tn": 12,
+        "precision": 1.0,
+        "recall": 1.0,
+        "positive_classification_accuracy": 0.9166666666666666,
+        "tag_accuracy": 0.9166666666666666,
+        "false_positive_ids": [],
+        "false_negative_ids": []
+      },
+      "new": {
+        "tp": 12,
+        "fp": 0,
+        "fn": 0,
+        "tn": 12,
+        "precision": 1.0,
+        "recall": 1.0,
+        "positive_classification_accuracy": 1.0,
+        "tag_accuracy": 1.0,
+        "false_positive_ids": [],
+        "false_negative_ids": []
+      }
+    }
+  }
+}

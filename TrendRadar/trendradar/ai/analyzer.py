@@ -10,6 +10,9 @@ import json
 from dataclasses import dataclass, field
 from typing import Any, Callable, Dict, List, NamedTuple, Optional
 
+from trendradar.ai.fact_pack import make_fact_pack
+from trendradar.ai.primary_materials import PrimaryEnricher
+from pathlib import Path
 from trendradar.ai.evidence import ground_analysis, safe_source_url
 from trendradar.ai.client import AIClient
 from trendradar.ai.prompt_loader import load_prompt_template
@@ -29,6 +32,7 @@ class AIAnalysisResult:
     evidence_claims: List[Dict] = field(default_factory=list)
     evidence_sources: Dict[str, Dict] = field(default_factory=dict)
     evidence_rejected_count: int = 0
+    fact_pack: Dict = field(default_factory=dict)
 
     # 基础元数据
     raw_response: str = ""               # 原始响应
@@ -98,6 +102,7 @@ class AIAnalyzer:
         self.include_rank_timeline = analysis_config.get("INCLUDE_RANK_TIMELINE", False)
         self.include_standalone = analysis_config.get("INCLUDE_STANDALONE", False)
         self.language = analysis_config.get("LANGUAGE", "Chinese")
+        self.primary_config = analysis_config.get("PRIMARY_MATERIALS", {})
 
         # 加载提示词模板
         self.system_prompt, self.user_prompt_template = load_prompt_template(
@@ -155,6 +160,18 @@ class AIAnalyzer:
 
         # 准备新闻内容并获取统计数据
         self._evidence_sources = {}
+        if self.primary_config.get('ENABLED'):
+            stats = [{**group, 'titles': [dict(t) if isinstance(t, dict) else t for t in group.get('titles', [])]} for group in stats]
+            candidates = [t for group in stats for t in group['titles'] if isinstance(t, dict) and t.get('url')][:5]
+            try:
+                enriched = PrimaryEnricher(Path('output/meta/primary_cache'),
+                    max_articles=self.primary_config.get('MAX_ARTICLES', 5),
+                    budget_seconds=self.primary_config.get('BUDGET_SECONDS', 20)).enrich(candidates)
+                for item, material in zip(candidates, enriched):
+                    item.update(primary_materials=material['primary_materials'], primary_status=material['primary_status'])
+            except Exception:
+                # Secondary materials must never suppress the original report.
+                print('[AI] 原站材料补充不可用，继续仅依据标题/摘要分析')
         prepared = self._prepare_news_content(stats, rss_stats)
         total_news = prepared.hotlist_total + prepared.rss_total
 
@@ -241,6 +258,11 @@ class AIAnalyzer:
                 if not result.evidence_claims:
                     result.success = False
                     result.error = "未返回启用板块的有效依据分析"
+
+            if result.success:
+                day = self.get_time_func().date().isoformat()
+                articles = [{'id': sid, **record, 'date': day} for sid, record in self._evidence_sources.items()]
+                result.fact_pack = make_fact_pack(articles, day, result.evidence_claims, result.evidence_sources)
 
             # 填充统计数据
             result.total_news = total_news
@@ -393,8 +415,20 @@ class AIAnalyzer:
         record = {'title': str(item.get('title', '')),
                   'source': str(source),
                   'url': safe_source_url(item.get('url') or item.get('link') or ''),
-                  'summary': str(item.get('summary') or '')[:2000]}
+                  'summary': str(item.get('summary') or '')[:2000],
+                  'assessment': item.get('assessment', {}),
+                  'progress': item.get('progress', {}),
+                  'primary_materials': []}
         self._evidence_sources[source_id] = record
+        for material in (item.get('primary_materials') or [])[:2]:
+            if not isinstance(material, dict) or not safe_source_url(material.get('url')):
+                continue
+            primary_id = f"N{len(self._evidence_sources) + 1:03d}"
+            primary = {'title': str(material.get('title') or ''), 'url': safe_source_url(material['url']),
+                       'source': '原站材料候选', 'summary': str(material.get('text') or '')[:3000]}
+            self._evidence_sources[primary_id] = primary
+            record['primary_materials'].append({'id': primary_id, **primary,
+                'relation': '来自原报道链接；关联性需核对，不能视为独立证据'})
         # JSON-escape untrusted title/summary, including newlines and markup.
         return json.dumps({'id': source_id, **record, 'observations': line}, ensure_ascii=False)
 

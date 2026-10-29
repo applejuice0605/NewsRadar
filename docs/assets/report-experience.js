@@ -28,8 +28,33 @@
     return state.data ? state.data.as_of : '';
   }
 
+  function safeHref(value) {
+    try {
+      var url = new URL(value, window.location.origin);
+      return /^https?:$/.test(url.protocol) && !url.username && !url.password ? url.href : '#';
+    } catch (_error) { return '#'; }
+  }
+
+  function editorialHtml(article) {
+    var assessment = article.assessment || {};
+    var detail = article.editorial || {};
+    var materials = article.primary_materials || [];
+    var evidence = '<a href="' + escapeHtml(safeHref(article.url || article.report_url)) + '" target="_blank" rel="noopener noreferrer">原始报道</a>';
+    materials.forEach(function (material) {
+      evidence += ' · <a href="' + escapeHtml(safeHref(material.url)) + '" target="_blank" rel="noopener noreferrer">原站材料候选</a>';
+    });
+    var values = '<dt>发生什么</dt><dd>' + escapeHtml(article.title) + '</dd>';
+    if (assessment.reason && assessment.decision !== 'legacy_unknown') values += '<dt>为何关注</dt><dd>' + escapeHtml(assessment.reason) + '</dd>';
+    if (detail.interpretation) values += '<dt>AI 判断（推测）</dt><dd>' + escapeHtml(detail.interpretation) + '</dd>';
+    values += '<dt>事实依据</dt><dd>' + evidence + '</dd>';
+    values += '<dt>证据局限</dt><dd>' + escapeHtml(detail.uncertainty || '标题或摘要为来源陈述；原站材料与新闻的关联、来源独立性仍需核对。') + '</dd>';
+    if (typeof assessment.information_value === 'number') values += '<dt>信息价值（AI 自评）</dt><dd>' + Math.round(assessment.information_value * 100) + '% · 主题相关度 ' + Math.round(assessment.topic_relevance * 100) + '%</dd>';
+    else values += '<dt>信息价值</dt><dd>旧分类未评分</dd>';
+    return '<details class="editorial-detail"><summary>重点依据与工程影响</summary><dl class="editorial-facts">' + values + '</dl></details>';
+  }
+
   function articleLink(article) {
-    var href = article.url || article.report_url;
+    var href = safeHref(article.url || article.report_url);
     return '<a href="' + escapeHtml(href) + '" target="_blank" rel="noopener noreferrer">' +
       escapeHtml(article.title) + '</a>';
   }
@@ -38,7 +63,7 @@
     var root = document.getElementById('experienceList');
     if (!root || !state.data) return;
     var ids = state.data.recommendations[state.active] || [];
-    var articles = ids.map(function (id) { return state.articles.get(id); }).filter(Boolean);
+    var articles = ids.map(function (id) { return state.articles.get(id); }).filter(function (article) { return article && article.date === reportDate(); });
     var visibleArticles = state.expanded ? articles : articles.slice(0, DEFAULT_RECOMMENDATION_LIMIT);
     root.innerHTML = visibleArticles.map(function (article) {
       return '<article class="experience-card">' +
@@ -46,6 +71,8 @@
         '<p class="experience-meta">' + escapeHtml(article.source) + ' · ' + escapeHtml(article.date) +
         ' · ' + escapeHtml(article.score.reason) + '</p></div>' +
         '<span class="experience-score" title="综合重要性评分">' + article.score.total + '</span></div>' +
+        (article.progress ? '<p class="experience-progress">' + escapeHtml(article.progress.label) + '</p>' : '') +
+        (article.syndication ? '<p class="experience-meta">来源独立性未核验</p>' : '') + editorialHtml(article) +
         '<div class="experience-actions"><a href="/events.html#' + escapeHtml(article.event_id) + '">查看事件与依据</a></div>' +
         '</article>';
     }).join('') || '<p>当前没有可展示的重点新闻。</p>';
@@ -74,7 +101,7 @@
     var panel = document.createElement('section');
     panel.className = 'experience-panel';
     panel.setAttribute('aria-labelledby', 'experienceTitle');
-    panel.innerHTML = '<p class="experience-kicker">AI DAILY BRIEF · ' + escapeHtml(state.data.as_of) + '</p>' +
+    panel.innerHTML = '<p class="experience-kicker">AI DAILY BRIEF · ' + escapeHtml(reportDate()) + '</p>' +
       '<h2 id="experienceTitle">今天先看这些</h2>' +
       '<p class="experience-summary">' + escapeHtml(
         leadEvent
@@ -152,6 +179,33 @@
       data.articles.forEach(function (article) { state.articles.set(article.id, article); });
       renderPanel();
       annotateReportItems();
+      // Optional canonical brief; old historical pages never inherit today's claims.
+      fetch('/facts/' + reportDate() + '.json', { cache: 'no-store' }).then(function (response) {
+        if (!response.ok) throw new Error('facts unavailable');
+        return response.json();
+      }).then(function (pack) {
+        if (pack.date !== reportDate()) return;
+        var facts = new Map((pack.articles || []).map(function (item) { return [normalizedUrl(item.url), item]; }));
+        var screening = new Map((pack.screening_decisions || []).map(function (item) { return [item.title, item]; }));
+        data.articles.forEach(function (article) {
+          if (article.date === pack.date && screening.has(article.title)) article.assessment = screening.get(article.title);
+          var fact = facts.get(normalizedUrl(article.url));
+          if (!fact || fact.date !== article.date) return;
+          ['assessment', 'progress', 'primary_materials', 'syndication'].forEach(function (key) { article[key] = fact[key]; });
+          var sourceIds = Object.keys(pack.evidence_sources || {}).filter(function (id) {
+            return normalizedUrl(pack.evidence_sources[id].url) === normalizedUrl(article.url);
+          });
+          var claim = (pack.claims || []).find(function (item) { return item.source_ids.some(function (id) { return sourceIds.includes(id); }); });
+          if (claim) article.editorial = claim;
+        });
+        Object.keys(data.recommendations).forEach(function (kind) {
+          data.recommendations[kind] = data.recommendations[kind].filter(function (id) {
+            var article = state.articles.get(id);
+            return !article || !article.assessment || !['reject', 'rejected'].includes(article.assessment.decision);
+          });
+        });
+        renderList();
+      }).catch(function () { /* Canonical materials are optional for old reports. */ });
     }).catch(function () { /* Existing report remains fully usable. */ });
   }
 

@@ -72,3 +72,73 @@ body.dark-mode .podcast-empty { background: #2b2b2b; border-color: #fffef0; }
 
 .podcast-generated { display: block; margin-top: 4px; white-space: normal; }
 .podcast-report-time { margin: 0 0 10px; font-size: 12px; font-weight: 800; }
+
+/* Keep the comic palette while allowing long date/voice and chapter labels to wrap. */
+.speech-panel,
+.speech-panel * { box-sizing: border-box; }
+.speech-panel-head { flex-wrap: wrap; }
+.speech-panel-title,
+.podcast-meta,
+.podcast-report-time,
+.podcast-resume-note { min-width: 0; overflow-wrap: anywhere; white-space: normal; }
+.podcast-slot { grid-template-columns: minmax(0, 1fr); min-width: 0; }
+.podcast-audio { display: block; max-width: 100%; min-height: 44px; }
+.podcast-controls { display: flex; flex-wrap: wrap; align-items: center; gap: 12px; min-width: 0; }
+.podcast-rate-label { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; font-weight: 900; }
+.podcast-rate,
+.podcast-resume,
+.speech-panel .podcast-chapter {
+  min-height: 44px;
+  min-width: 44px;
+  max-width: 100%;
+  border: 3px solid var(--speech-ink);
+  border-radius: 0;
+  padding: 8px 12px;
+  background: var(--speech-paper);
+  color: var(--speech-ink);
+  box-shadow: 3px 3px 0 var(--speech-ink);
+  font: inherit;
+  font-weight: 900;
+  white-space: normal;
+  overflow-wrap: anywhere;
+  cursor: pointer;
+}
+.podcast-resume { background: var(--speech-yellow); }
+.podcast-resume:hover,
+.podcast-resume:active { background: #ffe36e; }
+body.dark-mode .speech-panel .podcast-slot.is-mini { background: #2b2b2b; }
+.podcast-resume[hidden] { display: none; }
+.podcast-resume-note { margin: 0; font-size: 12px; line-height: 1.5; }
+.podcast-chapters { display: flex; flex-wrap: wrap; gap: 10px; min-width: 0; }
+.speech-panel :focus-visible { outline: 4px solid #246bfd; outline-offset: 3px; }
+.podcast-slot.is-mini {
+  position: fixed;
+  z-index: 40;
+  left: max(12px, env(safe-area-inset-left, 0px));
+  right: max(12px, env(safe-area-inset-right, 0px));
+  bottom: calc(12px + env(safe-area-inset-bottom, 0px));
+  max-height: calc(100dvh - 40px - env(safe-area-inset-bottom, 0px));
+  overflow-y: auto;
+}
+.podcast-slot.is-mini .podcast-meta,
+.podcast-slot.is-mini .podcast-chapters,
+.podcast-slot.is-mini .podcast-resume-note { display: none; }
+html.has-podcast-mini { scroll-padding-bottom: calc(var(--podcast-mini-space, 0px) + env(safe-area-inset-bottom, 0px)); }
+html.has-podcast-mini body::after {
+  content: '';
+  display: block;
+  height: calc(var(--podcast-mini-space, 0px) + env(safe-area-inset-bottom, 0px));
+}
+@media (max-width: 640px) {
+  .speech-panel { padding: 10px; margin-right: 6px; }
+  .podcast-slot { padding: 8px; }
+  /* Specificity also wins if experience styles are loaded after this file. */
+  .speech-panel .podcast-slot.is-mini {
+    left: max(8px, env(safe-area-inset-left, 0px));
+    right: max(8px, env(safe-area-inset-right, 0px));
+    bottom: calc(8px + env(safe-area-inset-bottom, 0px));
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .speech-panel *, .speech-panel *:hover { animation: none; transition: none; transform: none; }
+}

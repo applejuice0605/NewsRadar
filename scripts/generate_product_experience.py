@@ -5,6 +5,7 @@ from __future__ import annotations
 
 import argparse
 import hashlib
+import importlib.util
 import html
 import json
 import math
@@ -39,6 +40,12 @@ EVENT_THEMES = (
     ("product", r"产品|功能|api|应用|工具|平台"),
     ("infrastructure", r"芯片|算力|gpu|数据中心|推理|训练|部署"),
 )
+
+
+# Pure material helpers avoid importing AI providers in the system-Python site build.
+_fact_spec = importlib.util.spec_from_file_location('site_fact_pack', REPO_DIR / 'TrendRadar/trendradar/ai/fact_pack.py')
+_fact_module = importlib.util.module_from_spec(_fact_spec)
+_fact_spec.loader.exec_module(_fact_module)
 
 
 def _now() -> datetime:
@@ -185,16 +192,18 @@ def _events(records: list[dict[str, Any]]) -> list[dict[str, Any]]:
             "first_seen": min(item["date"] for item in items),
             "last_seen": max(item["date"] for item in items),
             "source_count": len(sources),
+            "independent_source_count": None,
+            "copy_candidate_groups": len({item.get("syndication", {}).get("group_id", item["id"]) for item in items}),
             "sources": sources,
             "article_count": len(items),
             "importance": max(item["score"]["total"] for item in items),
-            "summary": f"{tag} 相关事件，已收录 {len(items)} 条报道，来自 {len(sources)} 个来源。",
+            "summary": f"{tag} 相关事件，已收录 {len(items)} 条报道，来自 {len(sources)} 个渠道（独立性未核验）。",
             "analysis": {
                 "type": "inference",
                 "statement": "该主题持续出现" if len(items) > 1 else "该主题刚进入观察范围",
                 "confidence": "medium" if len(items) > 1 else "low",
                 "evidence_ids": [item["id"] for item in items[:5]],
-                "counterpoint": "当前仅基于已收录标题、热榜和来源数据，不能替代原文事实核验。",
+                "counterpoint": "当前仅基于已收录标题、热榜和来源数据；同标题或同URL是同稿候选，不同域名不代表独立证据，不能替代原文核验。",
             },
             "article_ids": [item["id"] for item in items],
         })
@@ -275,6 +284,7 @@ def build_experience(repo_dir: Path, now: datetime | None = None) -> dict[str, A
     raw_articles = [article for article in raw_articles if not peripheral_reason(article['title'])]
     as_of = max((item["date"] for item in raw_articles), default=now.date())
     all_records = _deduplicate_records([_article_record(item, as_of) for item in raw_articles])
+    all_records, syndication_groups = _fact_module.annotate_articles(all_records)
     all_events = _events(all_records)
     events = [
         event for event in all_events
@@ -329,6 +339,7 @@ def build_experience(repo_dir: Path, now: datetime | None = None) -> dict[str, A
             "for_you": [item["id"] for item in personalized],
         },
         "claims": claims,
+        "syndication_groups": syndication_groups,
         "events": events,
         "articles": records,
         "notification_preview": _notification_preview(events, records_by_id, as_of.isoformat()),

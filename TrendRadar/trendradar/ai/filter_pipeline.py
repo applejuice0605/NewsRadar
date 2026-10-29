@@ -6,9 +6,13 @@ AI 筛选流水线
 标签管理 → 待分类新闻收集 → 批量 AI 分类 → 结果保存 → 报告数据转换
 """
 
+import hashlib
+import json
+from pathlib import Path
 from typing import Any, Callable, Dict, List, Optional
 
 from trendradar.ai.filter import AIFilter, AIFilterResult
+from trendradar.ai.editorial_quality import POLICY_VERSION, legacy_assessment, unknown, write_sidecar
 from trendradar.ai.news_quality import peripheral_reason
 from trendradar.utils.time import (
     DEFAULT_TIMEZONE,
@@ -145,6 +149,8 @@ class AIFilterPipeline:
         total_results, succeeded_news_ids, succeeded_rss_ids = self._classify_batches(
             ai_filter, pending_news, pending_rss, active_tags, interests_content, filter_config,
         )
+
+        self._record_quality(effective_interests_file, ai_filter)
 
         # 6. 保存结果
         self._save_results(
@@ -316,7 +322,10 @@ class AIFilterPipeline:
             print(f"[AI筛选] RSS: 总计 {rss_total} 条{freshness_info}, 已分析跳过 {rss_skipped} 条, 本次发送AI分析 {rss_pending} 条")
 
     def _classify_batches(self, ai_filter, pending_news, pending_rss, active_tags, interests_content, filter_config):
-        batch_size = filter_config.get("BATCH_SIZE", 200)
+        self._run_assessments = []
+        # Complete accept/reject decisions carry more output than legacy sparse tags.
+        # Bound each call to avoid truncation marking whole batches retryable forever.
+        batch_size = max(1, min(int(filter_config.get("BATCH_SIZE", 24)), 24))
         batch_interval = filter_config.get("BATCH_INTERVAL", 5)
         total_results = []
         batch_count = 0
@@ -334,13 +343,19 @@ class AIFilterPipeline:
             ]
             batch_results = ai_filter.classify_batch(titles_for_ai, active_tags, interests_content)
             batch_count += 1
+            assessments = getattr(ai_filter, "last_assessments", None)
+            if assessments is None:
+                # Compatibility for custom filters without the assessment API.
+                assessments = [dict(unknown(n["id"], "assessment_unavailable"), title=n["title"], tag=None) for n in batch]
+            self._run_assessments.extend(dict(a, source_type="hotlist") for a in assessments)
+            completed_ids = {a["id"] for a in assessments if a.get("completed")}
             if batch_results is None:
                 print(f"[AI筛选] 热榜批次 {i // batch_size + 1}: {len(batch)} 条 → 分类失败，将在下次运行重试")
                 continue
             for r in batch_results:
                 r["source_type"] = "hotlist"
             total_results.extend(batch_results)
-            succeeded_news_ids.extend(n["id"] for n in batch)
+            succeeded_news_ids.extend(n["id"] for n in batch if n["id"] in completed_ids)
             print(f"[AI筛选] 热榜批次 {i // batch_size + 1}: {len(batch)} 条 → {len(batch_results)} 条匹配")
 
         succeeded_rss_ids = []
@@ -356,16 +371,64 @@ class AIFilterPipeline:
             ]
             batch_results = ai_filter.classify_batch(titles_for_ai, active_tags, interests_content)
             batch_count += 1
+            assessments = getattr(ai_filter, "last_assessments", None)
+            if assessments is None:
+                assessments = [dict(unknown(n["id"], "assessment_unavailable"), title=n["title"], tag=None) for n in batch]
+            self._run_assessments.extend(dict(a, source_type="rss") for a in assessments)
+            completed_ids = {a["id"] for a in assessments if a.get("completed")}
             if batch_results is None:
                 print(f"[AI筛选] RSS 批次 {i // batch_size + 1}: {len(batch)} 条 → 分类失败，将在下次运行重试")
                 continue
             for r in batch_results:
                 r["source_type"] = "rss"
             total_results.extend(batch_results)
-            succeeded_rss_ids.extend(n["id"] for n in batch)
+            succeeded_rss_ids.extend(n["id"] for n in batch if n["id"] in completed_ids)
             print(f"[AI筛选] RSS 批次 {i // batch_size + 1}: {len(batch)} 条 → {len(batch_results)} 条匹配")
 
         return total_results, succeeded_news_ids, succeeded_rss_ids
+
+    def _record_quality(self, interests_file, ai_filter):
+        """Local sidecar only. Unknown/remote backends retain assessments in result."""
+        from trendradar.storage.local import LocalStorageBackend
+        self._quality_notes = []
+        self._quality_sidecar_path = ""
+        self._quality_by_id = {}
+        current = getattr(self, "_run_assessments", [])
+        failures = sum(not a.get("completed", False) for a in current)
+        if failures:
+            self._quality_notes.append(f"classification_request_failures:{failures}")
+        backend = getattr(self.storage, "_backend", self.storage)
+        if isinstance(backend, LocalStorageBackend):
+            try:
+                now = self.get_time()
+                day = now.strftime("%Y-%m-%d")
+                path = Path(backend.data_dir) / "meta" / "filter_quality" / (day + ".json")
+                if path.exists():
+                    document = json.loads(path.read_text(encoding="utf-8"))
+                    for run in document["runs"]:
+                        if run.get("interests_file") == interests_file:
+                            for a in run["assessments"]:
+                                if a.get("completed"):
+                                    self._quality_by_id[(a["source_type"], a["id"])] = a
+                if current:
+                    self._quality_sidecar_path = write_sidecar(backend.data_dir, day, {
+                        "policy_version": POLICY_VERSION, "interests_file": interests_file,
+                        "timestamp": now.isoformat(),
+                        "thresholds": {k: ai_filter.filter_config.get(k, v) for k, v in
+                                       (("MIN_TOPIC_RELEVANCE", .7), ("MIN_INFORMATION_VALUE", .5))},
+                        "prompt_sha256": hashlib.sha256(
+                            (ai_filter.classify_system + "\n" + ai_filter.classify_user).encode()).hexdigest(),
+                        "assessments": current,
+                    })
+                elif path.exists():
+                    self._quality_sidecar_path = str(path)
+            except (OSError, ValueError, KeyError, TypeError, AttributeError, ImportError) as exc:
+                self._quality_notes.append("quality_sidecar_unavailable:" + type(exc).__name__)
+        else:
+            self._quality_notes.append("quality_sidecar_skipped: local backend data directory unavailable; assessments returned in memory")
+        for a in current:
+            if a.get("completed"):
+                self._quality_by_id[(a["source_type"], a["id"])] = a
 
     def _save_results(self, total_results, succeeded_news_ids, succeeded_rss_ids, effective_interests_file, current_hash):
         if total_results:
@@ -414,7 +477,17 @@ class AIFilterPipeline:
         seen_titles: Dict[str, set] = {}
 
         for r in raw_results:
-            if peripheral_reason(r.get("title", "")):
+            assessment = r.get("assessment") or getattr(self, "_quality_by_id", {}).get(
+                (r.get("source_type", "hotlist"), r.get("news_item_id")))
+            if assessment is None:
+                assessment = legacy_assessment(r.get("news_item_id"), r.get("tag_id"),
+                                               r.get("relevance_score"), "accept")
+            assessment = dict(assessment, title=r.get("title", ""), tag=r.get("tag"))
+            if assessment.get("completed") and assessment.get("decision") == "reject":
+                continue
+            # Retain the existing narrow legacy-cache safety rule, without
+            # applying keyword vetoes to new title-evidenced decisions.
+            if assessment["policy_version"] == "legacy_unknown" and peripheral_reason(r.get("title", "")):
                 continue
             tag_name = r["tag"]
             if tag_name not in tag_groups:
@@ -449,6 +522,7 @@ class AIFilterPipeline:
                 "last_time": r.get("last_time", ""),
                 "count": r.get("count", 1),
                 "relevance_score": r.get("relevance_score", 0),
+                "assessment": dict(assessment),
                 "source_type": r.get("source_type", "hotlist"),
             })
             tag_groups[tag_name]["count"] += 1
@@ -471,6 +545,9 @@ class AIFilterPipeline:
             total_matched=total_matched,
             total_processed=total_processed,
             success=True,
+            assessments=list(getattr(self, "_run_assessments", [])),
+            quality_sidecar_path=getattr(self, "_quality_sidecar_path", ""),
+            quality_notes=list(getattr(self, "_quality_notes", [])),
         )
 
     def convert_to_report_data(

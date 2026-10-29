@@ -7,7 +7,7 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / 'TrendRadar'))
-from trendradar.ai.news_quality import peripheral_reason
+from generate_site_insights import peripheral_reason
 
 
 def evaluate(samples, predictions=None):
@@ -18,7 +18,9 @@ def evaluate(samples, predictions=None):
             failures.append(row['id'])
     result = {'sample_count': len(samples), 'rule_failures': failures,
               'rule_pass_count': len(samples) - len(failures),
-              'scope': '人工制定的编辑种子样本；规则回归不等于AI筛选准确率；不代表真实流量分布',
+              'scope': '编辑判断样本；规则回归不等于AI筛选准确率；不代表真实流量分布',
+              'annotation_authors': sorted({row.get('annotation_author', 'unspecified') for row in samples}),
+              'human_reviewed': all(row.get('human_reviewed', False) for row in samples),
               'ai_evaluation': None}
     if predictions is not None:
         truth = {row['id']: row for row in samples}
@@ -41,7 +43,10 @@ def evaluate(samples, predictions=None):
         result['ai_evaluation'] = {'tp': tp, 'fp': fp, 'fn': fn, 'tn': tn,
             'precision': tp / (tp + fp) if tp + fp else None,
             'recall': tp / (tp + fn) if tp + fn else None,
-            'positive_classification_accuracy': classified / positive if positive else None}
+            'positive_classification_accuracy': classified / positive if positive else None,
+            'tag_accuracy': classified / tp if tp else None,
+            'false_positive_ids': [p['id'] for p in predictions if p['accepted'] and not truth[p['id']]['expected_accept']],
+            'false_negative_ids': [p['id'] for p in predictions if not p['accepted'] and truth[p['id']]['expected_accept']]}
     return result
 
 
@@ -56,6 +61,8 @@ def main():
     result = evaluate(samples, predictions)
     text = json.dumps(result, ensure_ascii=False, indent=2)
     if args.output:
+        if not args.output.resolve().is_relative_to((ROOT / ".deploy").resolve()):
+            parser.error("--output must be under .deploy")
         args.output.parent.mkdir(parents=True, exist_ok=True)
         args.output.write_text(text + '\n')
     print(text)

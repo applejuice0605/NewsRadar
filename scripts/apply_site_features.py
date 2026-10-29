@@ -19,7 +19,7 @@ ROUTE_FILES = {
     "trends": ("trends.html", "trends.json"),
     "status": ("status.html", "health.json"),
     "sources": ("sources.html", "sources.json"),
-    "experience": ("experience.json", "search-index.json", "events.html", "search.html", "notification-preview.json"),
+    "experience": ("experience.json", "search-index.json", "events.html", "search.html", "notification-preview.json", "facts"),
 }
 
 FAVICON_HTML = (
@@ -41,7 +41,7 @@ WORDMARK_STYLE = (
     '.header-brand{display:block;width:clamp(300px,38vw,380px);margin:0;position:absolute;top:6px;left:12px;z-index:2}'
     '.header-brand-mark{position:absolute;top:-4px;right:0;width:clamp(56px,6vw,68px);height:auto;z-index:2}'
     '.header-brand-wordmark{display:block;width:calc(100% - 28px);height:auto}'
-    '.header-title{margin-top:60px}'
+    '.save-buttons{margin-top:100px}.header-title{margin-top:12px}'
     '@media(max-width:480px){.header-brand{width:min(286px,78vw);top:6px;left:8px}'
     '.header-brand-mark{width:52px;top:-3px}.header-brand-wordmark{width:calc(100% - 24px)}'
     '.save-buttons{margin-top:98px}.header-title{margin-top:12px}'
@@ -50,6 +50,10 @@ WORDMARK_STYLE = (
     'body.wide-mode .rss-feeds-grid,body.wide-mode .ai-section .ai-blocks-grid,'
     'body.wide-mode .new-section .new-sources-grid,'
     'body.wide-mode .standalone-section .standalone-groups-grid{grid-template-columns:1fr}}'
+    '@media(max-width:480px){.header-info,body.wide-mode .header-info{grid-template-columns:repeat(4,minmax(0,1fr));gap:6px}'
+    '.header-info .info-item{padding:8px 3px;min-width:0}.header-info .info-label{font-size:12px;line-height:1.3}'
+    '.header-info .info-value{font-size:14px;line-height:1.4;overflow-wrap:anywhere}'
+    '.header{padding-bottom:16px}.header-title{font-size:24px}.header-info{margin-top:16px}}'
     '</style>'
 )
 SOCIAL_IMAGE_HTML = (
@@ -198,7 +202,11 @@ def apply_features(site_dir: Path, environment: str, switches: dict[str, bool]) 
         if switches[feature]:
             continue
         for filename in filenames:
-            site_dir.joinpath(filename).unlink(missing_ok=True)
+            target = site_dir / filename
+            if target.is_dir():
+                shutil.rmtree(target)
+            else:
+                target.unlink(missing_ok=True)
 
     if not switches["speech"]:
         shutil.rmtree(site_dir / "audio", ignore_errors=True)

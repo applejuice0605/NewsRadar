@@ -122,7 +122,7 @@
 }
 
 .news-evidence-toggle {
-  min-height: 34px;
+  min-height: 44px;
   margin-top: 8px;
   padding: 4px 8px;
   font-size: 12px;
@@ -141,7 +141,7 @@
 }
 
 .podcast-chapter {
-  min-height: 36px;
+  min-height: 44px;
   padding: 5px 9px;
   font-size: 12px;
 }
@@ -155,7 +155,7 @@
   z-index: 40;
   left: max(12px, calc((100vw - 1180px) / 2));
   right: max(12px, calc((100vw - 1180px) / 2));
-  bottom: 12px;
+  bottom: calc(12px + env(safe-area-inset-bottom, 0px));
   border: 4px solid #171717;
   background: #fffdf0;
   box-shadow: 8px 8px 0 #171717;
@@ -187,3 +187,14 @@
   .news-evidence-toggle,
   .podcast-chapter { transition: none; }
 }
+
+/* Editorial evidence uses flat rows inside the existing comic panel. */
+.editorial-detail { margin: 12px 0; }
+.editorial-detail summary { cursor: pointer; font-weight: 900; min-height: 44px; padding: 10px 0; }
+.editorial-facts { margin: 8px 0; max-width: 72ch; overflow-wrap: anywhere; }
+.editorial-facts dt { font-weight: 900; margin-top: 10px; }
+.editorial-facts dd { margin: 2px 0 8px; }
+.editorial-facts a { display: inline-block; padding: 6px 0; }
+.experience-progress { font-weight: 900; margin: 10px 0; }
+
+.speech-panel .podcast-chapter { min-height: 44px; }

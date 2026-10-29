@@ -6,9 +6,19 @@ AI 分析结果格式化模块
 """
 
 import html as html_lib
+from dataclasses import replace
+from .fact_pack import json_for_html
+from .evidence import ground_analysis
 import re
 from .analyzer import AIAnalysisResult
 from .evidence import safe_source_url
+
+
+def _canonical_result(result):
+    if result and result.fact_pack and result.fact_pack.get('schema_version') == 1:
+        return ground_analysis(replace(result, evidence_claims=result.fact_pack.get('claims', [])),
+                               result.fact_pack.get('evidence_sources', {}))
+    return result
 
 
 def _escape_html(text: str) -> str:
@@ -124,6 +134,7 @@ def _render_ai_analysis_markdown_like(
             须用 HTML 实体 ``("&#91;", "&#93;")`` 避免源名被「链接引用定义」吞掉，
             其余渠道沿用默认裸方括号。
     """
+    result = _canonical_result(result)
     if not result.success:
         if result.skipped:
             return f"ℹ️ {result.error}"
@@ -182,6 +193,7 @@ def render_ai_analysis_feishu(result: AIAnalysisResult) -> str:
 
 def render_ai_analysis_dingtalk(result: AIAnalysisResult) -> str:
     """渲染为钉钉 Markdown 格式"""
+    result = _canonical_result(result)
     if not result.success:
         if result.skipped:
             return f"ℹ️ {result.error}"
@@ -226,6 +238,7 @@ def render_ai_analysis_dingtalk(result: AIAnalysisResult) -> str:
 
 def render_ai_analysis_plain(result: AIAnalysisResult) -> str:
     """渲染为纯文本格式"""
+    result = _canonical_result(result)
     if not result.success:
         if result.skipped:
             return result.error
@@ -265,6 +278,7 @@ def render_ai_analysis_telegram(result: AIAnalysisResult) -> str:
     <b>, <i>, <u>, <s>, <code>, <pre>, <a href="">, <blockquote>
     换行直接使用 \\n，不支持 <br>, <div>, <h1>-<h6> 等标签。
     """
+    result = _canonical_result(result)
     if not result.success:
         if result.skipped:
             return f"ℹ️ {_escape_html(result.error)}"
@@ -314,8 +328,10 @@ def render_ai_analysis_html_rich(result: AIAnalysisResult) -> str:
     """渲染为丰富样式的 HTML 格式（HTML 报告用）"""
     if not result:
         return ""
+    result = _canonical_result(result)
 
     # 检查是否成功
+    result = _canonical_result(result)
     if not result.success:
         if result.skipped:
             return f"""
@@ -394,4 +410,6 @@ def render_ai_analysis_html_rich(result: AIAnalysisResult) -> str:
     ai_html += """
                     </div>
                 </div>"""
+    if result.fact_pack:
+        ai_html += '<script type="application/json" id="newsradar-fact-pack">' + json_for_html(result.fact_pack) + '</script>'
     return ai_html

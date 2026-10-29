@@ -10,13 +10,17 @@ import json
 import math
 import re
 import shutil
+import subprocess
 import sys
 import tempfile
 from datetime import date as Date
 from datetime import datetime, timedelta
+from html import unescape
 from html.parser import HTMLParser
 from pathlib import Path
 from typing import Any
+from urllib.parse import unquote, urlsplit
+from uuid import uuid4
 from zoneinfo import ZoneInfo
 
 import edge_tts
@@ -30,6 +34,7 @@ PROJECT_DIR = Path(__file__).resolve().parents[1] / "TrendRadar"
 CONFIG_PATH = PROJECT_DIR / "config" / "config.yaml"
 LATEST_DAILY = PROJECT_DIR / "output" / "html" / "latest" / "daily.html"
 OUTPUT_ROOT = PROJECT_DIR / "output" / "audio"
+CITATION_PATTERN = r"(?<![A-Za-z0-9_])N[0-9]{3,}(?![A-Za-z0-9_])"
 
 
 class AISectionParser(HTMLParser):
@@ -70,16 +75,23 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--force", action="store_true", help="regenerate even when the content hash is unchanged")
     parser.add_argument("--input", type=Path, default=LATEST_DAILY, help="daily HTML report to narrate")
     parser.add_argument("--date", help="report date in YYYY-MM-DD (required for a historical input)")
+    parser.add_argument("--fact-pack", type=Path, help="canonical v1 fact pack JSON (takes precedence over HTML)")
+    parser.add_argument("--output-root", type=Path, default=OUTPUT_ROOT, help="isolated audio output directory")
     return parser.parse_args()
 
 
 def write_json_atomic(path: Path, payload: dict[str, Any]) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
-    with tempfile.NamedTemporaryFile("w", encoding="utf-8", dir=path.parent, delete=False) as handle:
-        temporary = Path(handle.name)
-        json.dump(payload, handle, ensure_ascii=False, indent=2, sort_keys=True)
-        handle.write("\n")
-    temporary.replace(path)
+    temporary = None
+    try:
+        with tempfile.NamedTemporaryFile("w", encoding="utf-8", dir=path.parent, delete=False) as handle:
+            temporary = Path(handle.name)
+            json.dump(payload, handle, ensure_ascii=False, indent=2, sort_keys=True)
+            handle.write("\n")
+        temporary.replace(path)
+    finally:
+        if temporary is not None:
+            temporary.unlink(missing_ok=True)
 
 
 def extract_ai_content(path: Path) -> str:
@@ -103,24 +115,8 @@ def expand_short_script(
     min_chars: int,
     max_chars: int,
 ) -> str:
-    """Expand a short draft once without allowing facts beyond the source report."""
-    if len(script) >= min_chars:
-        return script
-    prompt = (
-        f"下面的中文播客稿只有 {len(script)} 个字符，请扩写到 {min_chars} 到 {max_chars} 个字符，"
-        "目标播报时长 6 到 8 分钟。保留快速新闻扫描、2 到 3 条重点分析和结尾观察。"
-        "只能使用参考材料中已有的事实；信息不足时增加解释和过渡，不得编造细节。"
-        "直接输出分段的口播正文，不要 Markdown。\n\n"
-        f"参考材料：\n{source}\n\n现有稿件：\n{script}"
-    )
-    return client.chat(
-        [
-            {"role": "system", "content": "你只输出事实可追溯的中文播客口播正文。"},
-            {"role": "user", "content": prompt},
-        ],
-        temperature=0.5,
-        max_tokens=3500,
-    )
+    """Compatibility shim: sparse news must never trigger model expansion."""
+    return script
 
 
 CHAPTER_TOPIC_RULES = (
@@ -165,8 +161,8 @@ def chapter_title(paragraph: str, index: int, total: int) -> str:
     return title if len(title) >= 4 else f"重点解读 {index}"
 
 
-def build_chapters(script: str) -> list[dict[str, Any]]:
-    """Create readable chapter labels and duration-independent seek ratios."""
+def build_chapters(script: str, duration_seconds: float | None = None) -> list[dict[str, Any]]:
+    """Character ratios approximate chapter positions within measured audio."""
     paragraphs = [re.sub(r"\s+", " ", item).strip() for item in re.split(r"\n\s*\n", script)]
     paragraphs = [item for item in paragraphs if item]
     if not paragraphs:
@@ -175,17 +171,19 @@ def build_chapters(script: str) -> list[dict[str, Any]]:
         chunk_size = math.ceil(len(paragraphs) / 6)
         paragraphs = [" ".join(paragraphs[index:index + chunk_size]) for index in range(0, len(paragraphs), chunk_size)]
     chapters = []
-    elapsed = 0
     consumed = 0
     total_chars = sum(len(paragraph) for paragraph in paragraphs)
     for index, paragraph in enumerate(paragraphs):
         title = chapter_title(paragraph, index, len(paragraphs))
+        if duration_seconds is not None:
+            topic = re.sub(r"^据[^：]+：", "", paragraph)
+            title = re.split(r"[。！？；\n]", topic, maxsplit=1)[0][:24]
         chapters.append({
             "title": title,
-            "start_seconds": elapsed,
+            "start_seconds": round(consumed / total_chars * duration_seconds, 3) if duration_seconds else 0,
             "start_ratio": round(consumed / total_chars, 6) if total_chars else 0,
+            "timing_approximate": True,
         })
-        elapsed += max(8, round(len(paragraph) / 4.2))
         consumed += len(paragraph)
     return chapters
 
@@ -211,18 +209,20 @@ def cleanup_audio_history(output_root: Path, today: Date, retention_days: int) -
     cutoff = today - timedelta(days=retention_days - 1)
     removed: list[Path] = []
     for child in output_root.iterdir():
-        if not child.is_dir():
+        if child.is_symlink() or not child.is_dir():
             continue
         try:
             directory_date = datetime.strptime(child.name, "%Y-%m-%d").date()
         except ValueError:
+            continue
+        if directory_date.isoformat() != child.name:
             continue
         if directory_date < cutoff:
             shutil.rmtree(child)
             removed.append(child)
 
     latest_path = output_root / "latest.json"
-    if latest_path.is_file():
+    if not latest_path.is_symlink() and latest_path.is_file():
         try:
             latest = json.loads(latest_path.read_text(encoding="utf-8"))
             latest_date = datetime.strptime(str(latest.get("date", "")), "%Y-%m-%d").date()
@@ -233,122 +233,405 @@ def cleanup_audio_history(output_root: Path, today: Date, retention_days: int) -
     return removed
 
 
+class FactPackParser(HTMLParser):
+    """Read raw JSON script data without interpreting HTML or executing scripts."""
+
+    def __init__(self) -> None:
+        super().__init__(convert_charrefs=False)
+        self.active = False
+        self.blocks: list[str] = []
+
+    def handle_starttag(self, tag: str, attrs: list[tuple[str, str | None]]) -> None:
+        values = dict(attrs)
+        if tag == "script" and values.get("id") == "newsradar-fact-pack":
+            if values.get("type") != "application/json":
+                raise ValueError("fact pack script must use application/json")
+            self.active = True
+            self.blocks.append("")
+
+    def handle_data(self, data: str) -> None:
+        if self.active:
+            self.blocks[-1] += data
+
+    def handle_endtag(self, tag: str) -> None:
+        if tag == "script":
+            self.active = False
+
+
+def embedded_fact_pack(html: str) -> dict[str, Any] | None:
+    parser = FactPackParser()
+    parser.feed(html)
+    if not parser.blocks:
+        return None
+    if len(parser.blocks) != 1 or parser.active:
+        raise ValueError("expected one complete embedded fact pack")
+    pack = json.loads(parser.blocks[0])
+    if not isinstance(pack, dict):
+        raise ValueError("embedded fact pack must be an object")
+    return pack
+
+
+def safe_url(value: Any) -> bool:
+    if not isinstance(value, str) or not value:
+        return False
+    decoded = unquote(value)
+    if any(c.isspace() or ord(c) < 32 or ord(c) == 127 for c in decoded) or any(c in decoded for c in "\\<>\"'`"):
+        return False
+    try:
+        url = urlsplit(value)
+        return bool(url.scheme in {"https", "http"} and url.hostname
+                    and url.username is None and url.password is None and url.port != 0)
+    except ValueError:
+        return False
+
+
+def validate_fact_pack(pack: Any, report_date: Date) -> dict[str, Any]:
+    """Verify provenance/extractive quotes, not the truth of source statements."""
+    if not isinstance(pack, dict) or type(pack.get("schema_version")) is not int or pack["schema_version"] != 1:
+        raise ValueError("expected fact pack schema_version 1")
+    if pack.get("date") != report_date.isoformat():
+        raise ValueError("fact pack date does not match selected date")
+    try:
+        stamp = datetime.fromisoformat(pack["generated_at"].replace("Z", "+00:00"))
+        if stamp.tzinfo is None:
+            raise ValueError("generated_at needs timezone")
+    except (KeyError, AttributeError, TypeError, ValueError) as exc:
+        raise ValueError("fact pack generated_at must be an ISO timestamp with timezone") from exc
+    articles, claims, sources = (pack.get(key) for key in ("articles", "claims", "evidence_sources"))
+    if not isinstance(articles, list) or not isinstance(claims, list) or not isinstance(sources, dict):
+        raise ValueError("fact pack requires articles, claims and evidence_sources")
+
+    def record(value: Any) -> None:
+        if not isinstance(value, dict) or not isinstance(value.get("title"), str):
+            raise ValueError("source record requires a text title")
+        if not value["title"].strip() and not value.get("summary"):
+            raise ValueError("source record requires a title or summary")
+        if not safe_url(value.get("url")):
+            raise ValueError("source record requires a safe HTTP(S) URL")
+        for key in ("source", "summary"):
+            if not isinstance(value.get(key, ""), str):
+                raise ValueError(f"source {key} must be text")
+
+    for source_id, source in sources.items():
+        # Article-only canonical packs may key this catalog by stable article ID.
+        if not isinstance(source_id, str) or not source_id.strip() or any(ord(c) < 32 for c in source_id):
+            raise ValueError("invalid evidence source ID")
+        record(source)
+    article_ids = set()
+    for article in articles:
+        record(article)
+        if not article["title"].strip():
+            raise ValueError("article requires a title")
+        article_id = article.get("id")
+        if not isinstance(article_id, str) or not article_id or article_id in article_ids:
+            raise ValueError("articles require unique IDs")
+        article_ids.add(article_id)
+
+    # Validate nested material links as well; no link is fetched by this script.
+    def links(value: Any) -> None:
+        if isinstance(value, dict):
+            for key, item in value.items():
+                if (key in {"url", "href"} or key.endswith("_url")) and item not in (None, ""):
+                    if not safe_url(item):
+                        raise ValueError("unsafe URL in fact pack")
+                else:
+                    links(item)
+        elif isinstance(value, list):
+            for item in value:
+                links(item)
+    links(pack)
+    for article in articles:
+        materials = article.get("primary_materials", [])
+        if isinstance(materials, list):
+            for material in materials:
+                if isinstance(material, str) and not safe_url(material):
+                    raise ValueError("primary material link must be a safe HTTP(S) URL")
+    sections = {"core_trends", "sentiment_controversy", "signals", "rss_insights", "outlook_strategy"}
+    for claim in claims:
+        if not isinstance(claim, dict):
+            raise ValueError("claim must be an object")
+        section, fact, ids = (claim.get(key) for key in ("section", "fact", "source_ids"))
+        if not isinstance(section, str) or section not in sections:
+            raise ValueError("unknown claim section")
+        if not isinstance(fact, str) or not fact.strip() or not isinstance(ids, list) or not ids:
+            raise ValueError("claim requires fact and source_ids")
+        for source_id in ids:
+            if not isinstance(source_id, str) or source_id not in sources:
+                raise ValueError("unknown claim citation ID")
+            source = sources[source_id]
+            if not any(fact.strip() in source.get(key, "") for key in ("title", "summary")):
+                raise ValueError("claim fact is not a quote from its cited source record")
+        for key in ("interpretation", "uncertainty"):
+            if not isinstance(claim.get(key, ""), str):
+                raise ValueError(f"claim {key} must be text")
+        for source_id in re.findall(CITATION_PATTERN, " ".join(str(claim.get(k, "")) for k in ("fact", "interpretation", "uncertainty"))):
+            if source_id not in sources:
+                raise ValueError("unknown citation in claim text")
+    if not claims and not 3 <= len(articles) <= 5:
+        raise ValueError("article-only fact packs require 3 to 5 articles")
+    return pack
+
+
+def spoken_text(value: str) -> str:
+    """Remove links and markup, never turn external text into instructions."""
+    value = unescape(value)
+    value = re.sub(r"\[([^]\n]+)\]\([^)]*\)", r"\1", value)
+    value = re.sub(r"<[^>]*>", "", value)
+    value = re.sub(r"(?:https?://|www\.)[^\s，。！？；、<>]+", "", value, flags=re.I)
+    value = re.sub(r"\[?" + CITATION_PATTERN + r"\]?", "", value)
+    return re.sub(r"\s+", " ", value).strip()
+
+
+ARTICLE_ONLY_REASON = "事实包仅含原始新闻，缺少通过来源校验的分析；本期仅播报来源陈述，不生成延伸判断。"
+
+
+def script_from_fact_pack(pack: dict[str, Any]) -> tuple[str, str, str]:
+    """Deterministic narration: no model can add facts or stretch a sparse day."""
+    parts = []
+    if pack["claims"]:
+        for claim in pack["claims"]:
+            names = list(dict.fromkeys(spoken_text(pack["evidence_sources"][i].get("source", ""))
+                                       or "所引新闻来源" for i in claim["source_ids"]))
+            paragraph = f"据{'、'.join(names)}的来源陈述：{spoken_text(claim['fact'])}"
+            if claim.get("interpretation", "").strip():
+                paragraph += "。条件性分析，尚待验证：" + spoken_text(claim["interpretation"])
+            paragraph += "。不确定性：" + spoken_text(claim.get("uncertainty", "") or "仅依据输入标题或摘要，未独立核验。")
+            parts.append(paragraph)
+        return "\n\n".join(parts), "fact_pack_claims", ""
+    for article in pack["articles"]:
+        paragraph = f"据{spoken_text(article.get('source') or article.get('source_name', '')) or '所引新闻来源'}报道：{spoken_text(article['title'])}"
+        if article.get("summary", "").strip():
+            paragraph += "。来源摘要：" + spoken_text(article["summary"])
+        parts.append(paragraph)
+    return "\n\n".join(parts), "fact_pack_articles", ARTICLE_ONLY_REASON
+
+
+def cache_hash(prompt: str, content: str, voice: str, rate: str, volume: str, script_limit: int) -> str:
+    payload = ["podcast-v4", prompt, content, voice, rate, volume, script_limit]
+    return hashlib.sha256(json.dumps(payload, ensure_ascii=False).encode("utf-8")).hexdigest()
+
+
+def measure_duration(path: Path) -> float:
+    """Use actual MP3 duration. Missing/broken probes never imply a safe length."""
+    probe = shutil.which("ffprobe")
+    if probe:
+        try:
+            result = subprocess.run(
+                [probe, "-v", "error", "-show_entries", "format=duration", "-of", "json", str(path)],
+                check=True, capture_output=True, text=True, timeout=30,
+            )
+            duration = float(json.loads(result.stdout)["format"]["duration"])
+            if math.isfinite(duration) and duration > 0:
+                return duration
+        except (OSError, subprocess.SubprocessError, ValueError, KeyError, TypeError):
+            pass
+    try:
+        from mutagen.mp3 import MP3
+        duration = float(MP3(path).info.length)
+        if math.isfinite(duration) and duration > 0:
+            return duration
+    except Exception:
+        pass
+    raise ValueError("cannot measure audio duration; nothing published (install ffprobe or mutagen)")
+
+
+def validate_duration(duration: float) -> None:
+    if not math.isfinite(duration) or not 0 < duration <= 600:
+        raise ValueError("audio duration must be measured and no more than 600 seconds")
+
+
 async def synthesize(text: str, output: Path, voice: str, rate: str, volume: str) -> None:
-    temporary = output.with_suffix(".tmp.mp3")
-    await edge_tts.Communicate(text, voice=voice, rate=rate, volume=volume).save(str(temporary))
-    temporary.replace(output)
+    # Only a private staging path is passed here. Even a partial save stays private.
+    await edge_tts.Communicate(text, voice=voice, rate=rate, volume=volume).save(str(output))
+
+
+def publish_bundle(stage: Path, output_root: Path, metadata: dict[str, Any]) -> None:
+    """Immutable URLs keep readers on a complete generation across index updates.
+
+    latest.json advances only to an equal or newer report date. The per-date
+    index always points at a complete bundle, including historical rebuilds,
+    and is rolled back if reading or committing latest fails.
+    Never overwrite a previous audio/transcript, including old daily.mp3 URLs.
+    """
+    day = output_root / metadata["date"]
+    if day.is_symlink():
+        raise ValueError("refusing to publish through a date directory symlink")
+    day.mkdir(parents=True, exist_ok=True)
+    generation = uuid4().hex
+    metadata["audio_url"] = f"/audio/{metadata['date']}/{generation}/daily.mp3"
+    metadata["transcript_url"] = f"/audio/{metadata['date']}/{generation}/daily.txt"
+    if (stage / "facts.json").is_file():
+        metadata["fact_pack_url"] = f"/audio/{metadata['date']}/{generation}/facts.json"
+    write_json_atomic(stage / "daily.json", metadata)
+    index = day / "daily.json"
+    previous = index.read_bytes() if index.exists() else None
+    bundle = day / generation
+    stage.replace(bundle)
+    try:
+        write_json_atomic(index, metadata)
+        latest_path = output_root / "latest.json"
+        latest_date = None
+        try:
+            current = json.loads(latest_path.read_text(encoding="utf-8"))
+            candidate = Date.fromisoformat(current["date"])
+            if candidate.isoformat() == current["date"]:
+                latest_date = candidate
+        except (FileNotFoundError, ValueError, TypeError, KeyError):
+            # A missing/malformed index has no valid date to preserve. Other
+            # I/O failures still roll back rather than risk losing a newer one.
+            pass
+        if latest_date is None or Date.fromisoformat(metadata["date"]) >= latest_date:
+            write_json_atomic(latest_path, metadata)
+    except Exception:
+        if previous is None:
+            index.unlink(missing_ok=True)
+        else:
+            # Restore the previous date index without a partial JSON write.
+            with tempfile.NamedTemporaryFile(dir=day, delete=False) as handle:
+                handle.write(previous)
+                restore = Path(handle.name)
+            restore.replace(index)
+        # Keep this complete generation for readers that observed the date index
+        # before rollback. Normal 90-day cleanup removes it with its date.
+        raise
 
 
 def main() -> int:
     args = parse_args()
+    try:
+        return generate(args)
+    except Exception as exc:
+        # AI/TTS libraries have provider-specific exception types. Staging still
+        # cleans up on every failure and no unknown-length audio is published.
+        print(f"[podcast] {exc}", file=sys.stderr)
+        return 1
+
+
+def generate(args: argparse.Namespace) -> int:
     podcast, ai_config = load_podcast_config()
-    timezone = ZoneInfo("Asia/Shanghai")
-    now = datetime.now(timezone)
-    retention_days = int(podcast.get("retention_days", 90))
-    removed = cleanup_audio_history(OUTPUT_ROOT, now.date(), retention_days)
-    if removed:
-        print(f"[podcast] removed {len(removed)} audio directorie(s) older than {retention_days} days")
+    now = datetime.now(ZoneInfo("Asia/Shanghai"))
     if not podcast.get("enabled", False):
         print("[podcast] disabled")
         return 0
-    input_path = args.input.resolve()
-    if not input_path.is_file():
+    output_root = args.output_root.resolve()
+    report_date = Date.fromisoformat(args.date) if args.date else now.date()
+    if args.date and report_date.isoformat() != args.date:
+        raise ValueError("--date must use YYYY-MM-DD")
+    pack = None
+    html = ""
+    if args.fact_pack:
+        pack = json.loads(args.fact_pack.read_text(encoding="utf-8"))
+    elif args.input.is_file():
+        html = args.input.read_text(encoding="utf-8", errors="replace")
+        pack = embedded_fact_pack(html)
+    else:
         print("[podcast] latest daily report is unavailable")
         return 0
 
-    report_html = input_path.read_text(encoding="utf-8", errors="replace")
-    if args.date:
-        try:
-            report_date = datetime.strptime(args.date, "%Y-%m-%d").date()
-        except ValueError:
-            print("[podcast] --date must use YYYY-MM-DD", file=sys.stderr)
-            return 2
+    source_kind, reason = "legacy_unverified", "旧版 HTML 缺少结构化事实包，口播未经 claim 来源校验。"
+    fact_pack_hash = None
+    if pack is not None:
+        validate_fact_pack(pack, report_date)
+        serialized_pack = json.dumps(pack, ensure_ascii=False, sort_keys=True, separators=(",", ":"))
+        fact_pack_hash = hashlib.sha256(serialized_pack.encode("utf-8")).hexdigest()
+        script, source_kind, reason = script_from_fact_pack(pack)
+        # Deterministic narration is the projection of semantic fields we
+        # actually speak (facts, interpretations, uncertainty, source names,
+        # or article titles/summaries). Do not invalidate playback/resume for
+        # generated_at, fetch timestamps, enrichment status or unused records.
+        content = json.dumps({"source_kind": source_kind, "script": script},
+                             ensure_ascii=False, sort_keys=True, separators=(",", ":"))
     else:
-        report_date = now.date()
-    report_date_match = re.search(r"生成时间</span>\s*<span class=\"info-value\">(\d{2}-\d{2})", report_html)
-    if not report_date_match or report_date_match.group(1) != report_date.strftime("%m-%d"):
-        print("[podcast] report date does not match the selected date; skipped")
-        return 0
-
-    content = extract_ai_content(input_path)
-    if len(content) < 80 or "AI 热点分析" not in content:
-        print("[podcast] latest daily report has no completed AI analysis; skipped")
-        return 0
-
-    date = report_date.isoformat()
-    source_limit = int(podcast.get("max_source_chars", 12000))
-    script_minimum = int(podcast.get("min_script_chars", 1700))
-    script_limit = int(podcast.get("max_script_chars", 4500))
-    content = content[:source_limit]
-    content_hash = hashlib.sha256(content.encode("utf-8")).hexdigest()
-    voice = str(podcast.get("voice", "zh-CN-XiaoxiaoNeural"))
-    rate = str(podcast.get("rate", "+0%"))
-    volume = str(podcast.get("volume", "+0%"))
-    output_dir = OUTPUT_ROOT / date
-    output_dir.mkdir(parents=True, exist_ok=True)
-    metadata_path = output_dir / "daily.json"
-    audio_path = output_dir / "daily.mp3"
-    transcript_path = output_dir / "daily.txt"
-    if not args.force and metadata_path.is_file() and audio_path.is_file():
-        existing = json.loads(metadata_path.read_text(encoding="utf-8"))
-        if (
-            existing.get("source_hash") == content_hash
-            and existing.get("voice") == voice
-            and existing.get("rate", "+0%") == rate
-            and existing.get("volume", "+0%") == volume
-        ):
-            print(f"[podcast] unchanged: {audio_path}")
+        # Compatibility applies solely to the existing production HTML route.
+        # A custom/historical HTML input must contain a canonical fact pack.
+        if args.fact_pack or args.input.resolve() != LATEST_DAILY.resolve() or args.date:
+            raise ValueError("custom or historical HTML requires a structured fact pack")
+        match = re.search(r'生成时间</span>\s*<span class="info-value">(\d{2}-\d{2})', html)
+        if not match or match.group(1) != report_date.strftime("%m-%d"):
+            print("[podcast] report date mismatch; skipped")
             return 0
+        content = extract_ai_content(args.input)
+        if len(content) < 80 or "AI 热点分析" not in content:
+            print("[podcast] no completed AI analysis; skipped")
+            return 0
+        content = content[:int(podcast.get("max_source_chars", 12000))]
 
+    voice = str(podcast.get("voice", "zh-CN-YunyangNeural"))
+    rate, volume = str(podcast.get("rate", "+0%")), str(podcast.get("volume", "+0%"))
+    script_limit = int(podcast.get("max_script_chars", 4500))
     prompt_path = CONFIG_PATH.parent / str(podcast.get("prompt_file", "podcast_prompt.txt"))
-    prompt = prompt_path.read_text(encoding="utf-8").replace("{content}", content)
-    client = AIClient(ai_config)
-    valid, error = client.validate_config()
-    if not valid:
-        print(f"[podcast] {error}", file=sys.stderr)
-        return 1
-    print("[podcast] rewriting AI analysis into a conversational script")
-    script = client.chat(
-        [
-            {"role": "system", "content": "你只输出可直接用于中文语音合成的自然口播正文。"},
-            {"role": "user", "content": prompt},
-        ],
-        temperature=0.7,
-        max_tokens=3000,
-    )
-    script = clean_script(script, script_limit)
-    if len(script) < script_minimum:
-        print(f"[podcast] draft is short ({len(script)} chars); expanding once")
-        script = expand_short_script(client, script, content, script_minimum, script_limit)
-        script = clean_script(script, script_limit)
-    if len(script) < 120:
-        print("[podcast] generated script is unexpectedly short", file=sys.stderr)
-        return 1
-
-    print(f"[podcast] synthesizing with {voice}")
-    asyncio.run(synthesize(script, audio_path, voice, rate, volume))
-    transcript_path.write_text(script + "\n", encoding="utf-8")
-    metadata = {
-        "schema_version": 2,
-        "date": date,
-        "generated_at": now.isoformat(timespec="seconds"),
-        "source_hash": content_hash,
-        "voice": voice,
-        "voice_label": voice_label(voice),
-        "rate": rate,
-        "volume": volume,
-        "script_chars": len(script),
-        "chapters": build_chapters(script),
-        "format": "daily_editorial",
-        "target_duration_minutes": "6-8",
-        "maximum_duration_minutes": 10,
-        "audio_url": f"/audio/{date}/daily.mp3",
-        "transcript_url": f"/audio/{date}/daily.txt",
-    }
-    write_json_atomic(metadata_path, metadata)
-    write_json_atomic(OUTPUT_ROOT / "latest.json", metadata)
-    print(f"[podcast] generated: {audio_path}")
+    prompt_template = prompt_path.read_text(encoding="utf-8")
+    digest = cache_hash(prompt_template, content, voice, rate, volume, script_limit)
+    metadata_path = output_root / report_date.isoformat() / "daily.json"
+    if not args.force and metadata_path.is_file():
+        try:
+            existing = json.loads(metadata_path.read_text(encoding="utf-8"))
+            relative = Path(existing["audio_url"].removeprefix("/audio/"))
+            cached_audio = output_root / relative
+            cached_transcript = cached_audio.with_suffix(".txt")
+            cached_metadata = cached_audio.with_suffix(".json")
+            if (existing.get("cache_hash") == digest and not relative.is_absolute()
+                    and cached_audio.resolve().is_relative_to(output_root) and cached_audio.is_file()
+                    and cached_transcript.is_file() and cached_metadata.is_file()):
+                validate_duration(measure_duration(cached_audio))
+                print(f"[podcast] unchanged: {cached_audio}")
+                return 0
+        except (ValueError, KeyError, TypeError):
+            pass
+    if pack is None:
+        client = AIClient(ai_config)
+        valid, error = client.validate_config()
+        if not valid:
+            raise ValueError(error)
+        script = client.chat([
+            {"role": "system", "content": "你只输出来源材料支持的中文口播正文；事实与推测必须区分。"},
+            {"role": "user", "content": prompt_template.replace("{content}", content)},
+        ], temperature=0.5, max_tokens=3000)
+        script = clean_script(spoken_text_blocks(script), script_limit)
+        if len(script) < 40:
+            raise ValueError("legacy script has no usable brief (under 40 characters)")
+    # Never truncate a structured fact or manufacture filler to meet a minimum.
+    if not script.strip():
+        raise ValueError("no speakable source material")
+    output_root.mkdir(parents=True, exist_ok=True)
+    with tempfile.TemporaryDirectory(prefix=".podcast-", dir=output_root) as temporary:
+        stage = Path(temporary) / "bundle"
+        stage.mkdir()
+        audio = stage / "daily.mp3"
+        print(f"[podcast] synthesizing {source_kind} with {voice}")
+        asyncio.run(synthesize(script, audio, voice, rate, volume))
+        if not audio.is_file() or audio.stat().st_size == 0:
+            raise ValueError("TTS produced no audio")
+        duration = measure_duration(audio)
+        validate_duration(duration)
+        (stage / "daily.txt").write_text(script + "\n", encoding="utf-8")
+        metadata = {
+            "schema_version": 3, "date": report_date.isoformat(),
+            "preview_only": output_root != OUTPUT_ROOT.resolve(),
+            "generated_at": now.isoformat(timespec="seconds"),
+            "source_hash": hashlib.sha256(content.encode("utf-8")).hexdigest(),
+            "fact_pack_hash": fact_pack_hash,
+            "cache_hash": digest, "source_kind": source_kind, "source_reason": reason,
+            "analysis_available": bool(pack and pack["claims"]),
+            "claim_grounded": source_kind == "fact_pack_claims",
+            "analysis_unavailable_reason": reason,
+            "voice": voice, "voice_label": voice_label(voice), "rate": rate, "volume": volume,
+            "duration_seconds": duration, "script_chars": len(script),
+            "chapters": build_chapters(script, duration),
+            "format": "daily_editorial", "maximum_duration_minutes": 10,
+        }
+        if pack is not None:
+            write_json_atomic(stage / "facts.json", pack)
+        publish_bundle(stage, output_root, metadata)
+    # Failed input/TTS/duration/publication must not delete a previous episode.
+    if report_date == now.date():
+        cleanup_audio_history(output_root, now.date(), int(podcast.get("retention_days", 90)))
+    print(f"[podcast] generated {metadata['audio_url']} ({duration:.1f}s)")
     return 0
+
+
+def spoken_text_blocks(script: str) -> str:
+    return "\n\n".join(spoken_text(part) for part in re.split(r"\n\s*\n", script))
 
 
 if __name__ == "__main__":

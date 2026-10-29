@@ -14,7 +14,9 @@ from pathlib import Path
 from typing import Any, Callable, Dict, List, Optional
 
 from trendradar.ai.client import AIClient
-from trendradar.ai.news_quality import peripheral_reason
+from trendradar.ai.editorial_quality import (
+    POLICY_VERSION, parse_decisions, unknown, thresholds,
+)
 from trendradar.ai.prompt_loader import load_prompt_template
 
 
@@ -32,6 +34,10 @@ class AIFilterResult:
     total_processed: int = 0     # 处理新闻总数
     success: bool = False
     error: str = ""
+    assessments: List[Dict] = field(default_factory=list)
+    quality_policy_version: str = POLICY_VERSION
+    quality_sidecar_path: str = ""
+    quality_notes: List[str] = field(default_factory=list)
 
 
 class AIFilter:
@@ -63,6 +69,8 @@ class AIFilter:
         self.batch_size = filter_config.get("BATCH_SIZE", 200)
         self.get_time_func = get_time_func
         self.debug = debug
+        thresholds(filter_config)  # Fail invalid configuration before making requests.
+        self.last_assessments: List[Dict] = []
 
         # 加载提示词模板
         self.classify_system, self.classify_user = load_prompt_template(
@@ -340,8 +348,12 @@ class AIFilter:
             成功返回 [{"news_item_id": int, "tag_id": int, "relevance_score": float}, ...]（无匹配时为空列表）；
             调用失败返回 None（用于区分"无匹配"与"调用失败"，失败批次不标记已分析以便下次重试）
         """
-        if not titles or not tags:
+        self.last_assessments = [dict(unknown(t["id"], "request_not_completed"), title=t["title"], tag=None) for t in titles]
+        if not titles:
             return []
+        if not tags:
+            self.last_assessments = [dict(unknown(t["id"], "no_tags"), title=t["title"], tag=None) for t in titles]
+            return None
 
         if not self.classify_user:
             print("[AI筛选] 分类提示词模板为空")
@@ -366,9 +378,14 @@ class AIFilter:
         user_prompt = user_prompt.replace("{news_count}", str(len(titles)))
         user_prompt = user_prompt.replace("{news_list}", news_list)
 
+        min_topic, min_value = thresholds(self.filter_config)
+        user_prompt = user_prompt.replace("{min_topic_relevance}", str(min_topic)).replace(
+            "{min_information_value}", str(min_value))
         messages = []
         if self.classify_system:
-            messages.append({"role": "system", "content": self.classify_system})
+            system_prompt = self.classify_system.replace("{min_topic_relevance}", str(min_topic)).replace(
+                "{min_information_value}", str(min_value))
+            messages.append({"role": "system", "content": system_prompt})
         messages.append({"role": "user", "content": user_prompt})
 
         if self.debug:
@@ -393,8 +410,10 @@ class AIFilter:
         try:
             response = self.client.chat(messages)
 
-            return self._parse_classify_response(response, titles, tags)
+            results = self._parse_classify_response(response, titles, tags)
+            return results if any(a["completed"] for a in self.last_assessments) else None
         except Exception as e:
+            self.last_assessments = [dict(unknown(t["id"], "request_failed:" + type(e).__name__), title=t["title"], tag=None) for t in titles]
             print(f"[AI筛选] 分类请求失败: {type(e).__name__}: {e}")
             return None
 
@@ -404,145 +423,21 @@ class AIFilter:
         titles: List[Dict],
         tags: List[Dict],
     ) -> List[Dict]:
-        """解析分类的 AI 响应
+        """Keep the legacy matching-row API; expose every input via last_assessments.
 
-        支持两种 JSON 格式：
-        - 新格式（扁平）: [{"id": 1, "tag_id": 1, "score": 0.9}, ...]
-        - 旧格式（嵌套）: [{"id": 1, "tags": [{"tag_id": 1, "score": 0.9}]}, ...]
-
-        每条新闻只保留一个最高分的 tag，杜绝同一条出现在多个标签下。
+        Parsing failures return [] here for parser compatibility. classify_batch
+        returns None when no decision completed; partial responses carry failures
+        in last_assessments so the pipeline only marks completed IDs analyzed.
         """
-        json_str = self._extract_json(response)
-        if not json_str:
-            if self.debug:
-                print(f"[AI筛选][DEBUG] 无法从分类响应中提取 JSON，原始响应前 500 字符: {(response or '')[:500]}")
-            return []
-
         try:
-            data = json.loads(json_str)
-        except json.JSONDecodeError as e:
-            if self.debug:
-                print(f"[AI筛选][DEBUG] 分类响应 JSON 解析失败: {e}")
-                print(f"[AI筛选][DEBUG] 提取的 JSON 文本前 500 字符: {json_str[:500]}")
-            return []
-
-        if not isinstance(data, list):
-            if self.debug:
-                print(f"[AI筛选][DEBUG] 分类响应顶层不是数组，实际类型: {type(data).__name__}")
-            return []
-
-        # 构建 id 映射
-        title_ids = {t["id"] for t in titles}
-        title_map = {t["id"]: t["title"] for t in titles}
-        tag_id_set = {t["id"] for t in tags}
-        tag_name_map = {t["id"]: t["tag"] for t in tags}
-
-        # 每条新闻只保留一个最高分的 tag
-        best_per_news: Dict[int, Dict] = {}  # news_id -> {"tag_id": ..., "score": ...}
-        skipped_news_ids = 0
-        skipped_tag_ids = 0
-        skipped_empty = 0
-
-        for item in data:
-            if not isinstance(item, dict):
-                continue
-            news_id = item.get("id")
-            if news_id not in title_ids:
-                skipped_news_ids += 1
-                continue
-
-            # 收集此条新闻的所有候选 tag
-            candidates = []
-
-            if "tag_id" in item:
-                # 新格式（扁平）: {"id": 1, "tag_id": 1, "score": 0.9}
-                candidates.append({"tag_id": item["tag_id"], "score": item.get("score", 0.5)})
-            elif "tags" in item:
-                # 旧格式（嵌套）: {"id": 1, "tags": [{"tag_id": 1, "score": 0.9}]}
-                matched_tags = item.get("tags", [])
-                if isinstance(matched_tags, list):
-                    if not matched_tags:
-                        skipped_empty += 1
-                        continue
-                    candidates.extend(matched_tags)
-
-            if not candidates:
-                skipped_empty += 1
-                continue
-
-            # 取最高分的有效 tag
-            best_tag_id = None
-            best_score = -1.0
-
-            for tag_match in candidates:
-                if not isinstance(tag_match, dict):
-                    continue
-                tag_id = tag_match.get("tag_id")
-                if tag_id not in tag_id_set:
-                    skipped_tag_ids += 1
-                    continue
-
-                score = tag_match.get("score", 0.5)
-                try:
-                    score = float(score)
-                    score = max(0.0, min(1.0, score))
-                except (ValueError, TypeError):
-                    score = 0.5
-
-                if score > best_score:
-                    best_score = score
-                    best_tag_id = tag_id
-
-            if best_tag_id is not None:
-                title_text = title_map.get(news_id, "")
-                tag_text = tag_name_map.get(best_tag_id, "")
-                if peripheral_reason(title_text) or self._should_reject_ambiguous_ai_match(title_text, tag_text):
-                    if self.debug:
-                        print(
-                            f"[AI筛选][DEBUG] 跳过缺少 AI 直接证据的泛科技标题: "
-                            f"[{news_id}] {title_text[:60]} -> {tag_text}"
-                        )
-                    continue
-
-                # 如果同一条新闻被多次返回，只保留分数更高的
-                existing = best_per_news.get(news_id)
-                if existing is None or best_score > existing["relevance_score"]:
-                    best_per_news[news_id] = {
-                        "news_item_id": news_id,
-                        "tag_id": best_tag_id,
-                        "relevance_score": best_score,
-                    }
-
-        results = list(best_per_news.values())
-
-        if self.debug:
-            ai_returned = len(data)
-            print(f"[AI筛选][DEBUG] --- 分类解析结果 ---")
-            print(f"[AI筛选][DEBUG] AI 返回 {ai_returned} 条, 有效 {len(results)} 条 (每条新闻仅保留最高分 tag)")
-            if skipped_empty > 0:
-                print(f"[AI筛选][DEBUG] 跳过空 tags: {skipped_empty} 条")
-            if skipped_news_ids > 0:
-                print(f"[AI筛选][DEBUG] !! 跳过无效 news_id: {skipped_news_ids} 条")
-            if skipped_tag_ids > 0:
-                print(f"[AI筛选][DEBUG] !! 跳过无效 tag_id: {skipped_tag_ids} 条")
-
-            # 按标签汇总
-            tag_summary: Dict[int, List[str]] = {}
-            for r in results:
-                tid = r["tag_id"]
-                if tid not in tag_summary:
-                    tag_summary[tid] = []
-                tag_summary[tid].append(
-                    f"  [{r['news_item_id']}] {title_map.get(r['news_item_id'], '?')[:40]} (score={r['relevance_score']:.2f})"
-                )
-
-            for tid, items in tag_summary.items():
-                tname = tag_name_map.get(tid, f"tag_{tid}")
-                print(f"[AI筛选][DEBUG] 标签「{tname}」匹配 {len(items)} 条:")
-                for line in items:
-                    print(line)
-
-        return results
+            data = json.loads(self._extract_json(response) or "null")
+        except (ValueError, TypeError):
+            data = None
+        self.last_assessments = parse_decisions(
+            data, titles, tags, getattr(self, "filter_config", {}))
+        return [dict(news_item_id=a["id"], tag_id=a["tag_id"],
+                     relevance_score=a["topic_relevance"], assessment=dict(a))
+                for a in self.last_assessments if a["decision"] == "accept"]
 
     def _should_reject_ambiguous_ai_match(self, title: str, tag_name: str) -> bool:
         """标题只有泛硬件/产业信息时，不接受 AI 相关标签的过度联想匹配。"""

@@ -48,6 +48,15 @@ python3 "$REPO_DIR/scripts/generate_site_insights.py" \
 python3 "$REPO_DIR/scripts/generate_product_experience.py" \
   --repo-dir "$DATA_REPO" \
   --site-dir "$PREVIEW_DIR"
+# Canonical editorial materials are local/read-only builds; no automatic AI calls.
+python3 "$REPO_DIR/scripts/build_fact_pack.py"   --repo-dir "$DATA_REPO" --site-dir "$PREVIEW_DIR" --enrich --max-primary 5
+if [ -f "$REPO_DIR/.deploy/p1/fact-pack.json" ]; then
+  python3 "$REPO_DIR/scripts/merge_preview_materials.py"     --site-dir "$PREVIEW_DIR" --material "$REPO_DIR/.deploy/p1/fact-pack.json"
+fi
+# Isolated preview audio is never copied back into the production collector.
+if [ -d "$REPO_DIR/.deploy/p1/audio" ]; then
+  python3 "$REPO_DIR/scripts/sync_preview_audio.py" --source "$REPO_DIR/.deploy/p1/audio" --destination "$PREVIEW_DIR/audio"
+fi
 python3 "$REPO_DIR/scripts/apply_site_features.py" \
   --site-dir "$PREVIEW_DIR" \
   --environment preview \
@@ -60,6 +69,10 @@ python3 "$REPO_DIR/scripts/apply_site_features.py" \
 # Explicit smoke-test artifact only; never overwrite the live daily report.
 if [ -f "$REPO_DIR/.deploy/first-batch/analysis-preview.html" ]; then
   cp "$REPO_DIR/.deploy/first-batch/analysis-preview.html" "$PREVIEW_DIR/analysis-preview.html"
+fi
+
+if [ -f "$REPO_DIR/.deploy/p1/analysis-preview.html" ]; then
+  cp "$REPO_DIR/.deploy/p1/analysis-preview.html" "$PREVIEW_DIR/analysis-preview.html"
 fi
 
 echo "[preview] deploying newsradar-preview"

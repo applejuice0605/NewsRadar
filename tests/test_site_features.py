@@ -56,7 +56,7 @@ class SiteFeatureTests(unittest.TestCase):
             self.assertIn("/assets/brand/favicon-32.png", page)
             self.assertIn("newsradar-wordmark.png", page)
             self.assertIn("top:6px", page)
-            self.assertIn("margin-top:60px", page)
+            self.assertIn(".save-buttons{margin-top:100px}", page)
             self.assertIn("margin-top:98px", page)
             self.assertIn("grid-template-columns:repeat(2", page)
             self.assertNotIn("drop-shadow(5px 5px", page)
@@ -113,3 +113,13 @@ class SiteFeatureTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+class MaterialFeatureIsolationTests(unittest.TestCase):
+    def test_fact_pack_directory_is_removed_when_experience_is_disabled(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root=Path(directory)
+            (root/'index.html').write_text('<html><head></head><body></body></html>')
+            (root/'facts').mkdir()
+            (root/'facts/latest.json').write_text('{"private_preview":true}')
+            MODULE.apply_features(root,'production',MODULE.FEATURE_DEFAULTS['production'].copy())
+            self.assertFalse((root/'facts').exists())

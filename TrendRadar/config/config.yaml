@@ -80,9 +80,11 @@ filter:
   method: ai
   priority_sort_enabled: true
 ai_filter:
-  batch_size: 200
+  batch_size: 24
   batch_interval: 2
   min_score: 0.7
+  min_topic_relevance: 0.7
+  min_information_value: 0.5
   reclassify_threshold: 0.6
   prompt_file: prompt.txt
   extract_prompt_file: extract_prompt.txt
@@ -186,6 +188,10 @@ ai_analysis:
   prompt_file: ai_analysis_prompt.txt
   mode: daily
   max_news_for_analysis: 150
+  primary_materials:
+    enabled: true
+    max_articles: 5
+    budget_seconds: 20
   include_rss: true
   include_standalone: false
   include_rank_timeline: true
@@ -195,7 +201,6 @@ podcast:
   rate: +0%
   volume: +0%
   max_source_chars: 12000
-  min_script_chars: 1700
   max_script_chars: 3200
   retention_days: 90
   prompt_file: podcast_prompt.txt

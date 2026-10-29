@@ -297,6 +297,11 @@ def _load_ai_analysis_config(config_data: Dict) -> Dict:
     enabled_env = _get_env_bool("AI_ANALYSIS_ENABLED")
 
     return {
+        "PRIMARY_MATERIALS": {
+            "ENABLED": ai_config.get("primary_materials", {}).get("enabled", False),
+            "MAX_ARTICLES": ai_config.get("primary_materials", {}).get("max_articles", 5),
+            "BUDGET_SECONDS": ai_config.get("primary_materials", {}).get("budget_seconds", 20),
+        },
         "ENABLED": enabled_env if enabled_env is not None else ai_config.get("enabled", False),
         "LANGUAGE": ai_config.get("language", "Chinese"),
         "PROMPT_FILE": ai_config.get("prompt_file", "ai_analysis_prompt.txt"),
@@ -337,7 +342,7 @@ def _load_ai_filter_config(config_data: Dict) -> Dict:
     ai_filter = config_data.get("ai_filter", {})
 
     return {
-        "BATCH_SIZE": ai_filter.get("batch_size", 200),
+        "BATCH_SIZE": ai_filter.get("batch_size", 24),
         "BATCH_INTERVAL": ai_filter.get("batch_interval", 5),
         "INTERESTS_FILE": ai_filter.get("interests_file"),  # None = 使用默认 config/ai_interests.txt
         "PROMPT_FILE": ai_filter.get("prompt_file", "prompt.txt"),
@@ -345,6 +350,8 @@ def _load_ai_filter_config(config_data: Dict) -> Dict:
         "UPDATE_TAGS_PROMPT_FILE": ai_filter.get("update_tags_prompt_file", "update_tags_prompt.txt"),
         "RECLASSIFY_THRESHOLD": ai_filter.get("reclassify_threshold", 0.6),
         "MIN_SCORE": float(ai_filter.get("min_score", 0)),
+        "MIN_TOPIC_RELEVANCE": ai_filter.get("min_topic_relevance", 0.7),
+        "MIN_INFORMATION_VALUE": ai_filter.get("min_information_value", 0.5),
     }
 
 
