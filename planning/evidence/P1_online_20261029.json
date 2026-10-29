@@ -1,0 +1,91 @@
+{
+  "source_commit": "c9aaaf8",
+  "checks": {
+    "/build-info.json": {
+      "status": 200,
+      "result": {
+        "environment": "preview",
+        "generated_at": "2026-10-29T16:07:32+08:00",
+        "git_branch": "staging",
+        "git_commit": "c9aaaf839343d466794b1de06a2eb291fe78eb5d",
+        "git_commit_short": "c9aaaf839343",
+        "data_branch": "main",
+        "data_commit": "2e35f393f90b14ca0ac300de2f3a5c68c22f672c",
+        "data_commit_short": "2e35f393f90b"
+      }
+    },
+    "/site-features.json": {
+      "status": 200,
+      "result": {
+        "environment": "preview",
+        "features": {
+          "speech": true,
+          "trends": true,
+          "status": true,
+          "sources": true,
+          "experience": true
+        }
+      }
+    },
+    "/facts/latest.json": {
+      "status": 200,
+      "result": {
+        "date": "2026-10-29",
+        "articles": 8,
+        "claims": 7
+      }
+    },
+    "/audio/latest.json": {
+      "status": 200,
+      "result": {
+        "date": "2026-10-29",
+        "duration_seconds": 253.848,
+        "voice": "zh-CN-YunyangNeural",
+        "source_kind": "fact_pack_claims",
+        "claim_grounded": true,
+        "preview_only": true
+      }
+    },
+    "/cloud-health.json": {
+      "status": 200,
+      "result": {
+        "readable": true
+      }
+    },
+    "audio_range": {
+      "status": 206,
+      "bytes": 1024,
+      "content_range": "bytes 0-1023/1523088",
+      "content_type": "audio/mpeg"
+    },
+    "audio_material": {
+      "status": 200,
+      "date": "2026-10-29"
+    },
+    "latest_asset": {
+      "status": 200,
+      "corrected_source_label": true,
+      "outdated_label": false
+    },
+    "public_features": {
+      "status": 200,
+      "result": {
+        "environment": "production",
+        "features": {
+          "speech": false,
+          "trends": false,
+          "status": false,
+          "sources": false,
+          "experience": false
+        }
+      }
+    },
+    "preview_auth": {
+      "protected": true,
+      "status": 403
+    }
+  },
+  "worker_version": "50d8a501-ca5d-42fd-947d-1bfd2ec3c339",
+  "python_tests_passed": 148,
+  "node_tests_passed": 28
+}
