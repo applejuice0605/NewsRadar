@@ -13,9 +13,16 @@
       "main": "./workers/preview-auth.mjs",
       "workers_dev": true,
       "preview_urls": false,
-      "triggers": { "crons": [] },
+      "triggers": {
+        "crons": [
+          "*/30 * * * *"
+        ]
+      },
       "kv_namespaces": [
-        { "binding": "HEALTH_MONITOR_STATE", "id": "b3e8906ca0f9442db9640a006af2eade" }
+        {
+          "binding": "HEALTH_MONITOR_STATE",
+          "id": "b3e8906ca0f9442db9640a006af2eade"
+        }
       ],
       "routes": [
         {
@@ -29,6 +36,9 @@
         "run_worker_first": true,
         "not_found_handling": "404-page",
         "html_handling": "auto-trailing-slash"
+      },
+      "vars": {
+        "HEALTH_MONITOR_ENABLED": "true"
       }
     }
   }

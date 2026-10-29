@@ -88,6 +88,17 @@ export default {
       return unauthorized();
     }
 
+    // Explicit authenticated action; custom header prevents cross-site form triggers.
+    if (new URL(request.url).pathname === '/cloud-health/check' && request.method === 'POST') {
+      if (request.headers.get('X-NewsRadar-Health-Check') !== '1') {
+        return new Response('Explicit health check header required', { status: 403 });
+      }
+      await scheduled({ cron: 'activation' }, env);
+      return Response.json({ success: true,
+        state: await env.HEALTH_MONITOR_STATE.get('dashboard-monitor:v1', 'json') },
+        { headers: { 'Cache-Control': 'no-store' } });
+    }
+
     if (new URL(request.url).pathname === '/cloud-health.json' && request.method === 'GET') {
       const report = await inspectHealth(env);
       return Response.json({ ...report, scheduler_enabled: env.HEALTH_MONITOR_ENABLED === 'true',

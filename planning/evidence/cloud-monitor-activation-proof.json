@@ -1,0 +1,86 @@
+{
+  "before": {
+    "status": "healthy",
+    "issues": {},
+    "details": [
+      "上次采集完成：2026-10-29 15:12:15；距今 8 分钟",
+      "音频要求日期：2026-10-28（上海时间 22:00 起要求当天）",
+      "音频日期：2026-10-28",
+      "音频生成：2026-10-28 20:48:46",
+      "音频资源：已验证，读取 32 字节"
+    ],
+    "checked_at": 1793258398427,
+    "diagnostics": {},
+    "scheduler_enabled": true,
+    "last_scheduled_check": null
+  },
+  "activation": {
+    "success": true,
+    "state": {
+      "version": 1,
+      "status": "healthy",
+      "issues": {},
+      "details": [
+        "上次采集完成：2026-10-29 15:12:15；距今 8 分钟",
+        "音频要求日期：2026-10-28（上海时间 22:00 起要求当天）",
+        "音频日期：2026-10-28",
+        "音频生成：2026-10-28 20:48:46",
+        "音频资源：已验证，读取 32 字节"
+      ],
+      "checked_at": 1793258399643,
+      "diagnostics": {},
+      "alert_open": false,
+      "last_alert_at": null
+    }
+  },
+  "after": {
+    "status": "healthy",
+    "issues": {},
+    "details": [
+      "上次采集完成：2026-10-29 15:12:15；距今 8 分钟",
+      "音频要求日期：2026-10-28（上海时间 22:00 起要求当天）",
+      "音频日期：2026-10-28",
+      "音频生成：2026-10-28 20:48:46",
+      "音频资源：已验证，读取 32 字节"
+    ],
+    "checked_at": 1793258401563,
+    "diagnostics": {},
+    "scheduler_enabled": true,
+    "last_scheduled_check": {
+      "version": 1,
+      "status": "healthy",
+      "issues": {},
+      "details": [
+        "上次采集完成：2026-10-29 15:12:15；距今 8 分钟",
+        "音频要求日期：2026-10-28（上海时间 22:00 起要求当天）",
+        "音频日期：2026-10-28",
+        "音频生成：2026-10-28 20:48:46",
+        "音频资源：已验证，读取 32 字节"
+      ],
+      "checked_at": 1793258399643,
+      "diagnostics": {},
+      "alert_open": false,
+      "last_alert_at": null
+    }
+  },
+  "dedup_repeat": {
+    "success": true,
+    "state": {
+      "version": 1,
+      "status": "healthy",
+      "issues": {},
+      "details": [
+        "上次采集完成：2026-10-29 15:12:15；距今 8 分钟",
+        "音频要求日期：2026-10-28（上海时间 22:00 起要求当天）",
+        "音频日期：2026-10-28",
+        "音频生成：2026-10-28 20:48:46",
+        "音频资源：已验证，读取 32 字节"
+      ],
+      "checked_at": 1793258403165,
+      "diagnostics": {},
+      "alert_open": false,
+      "last_alert_at": null
+    }
+  },
+  "pass": true
+}

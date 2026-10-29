@@ -127,11 +127,11 @@ export async function inspectHealth(env, now = Date.now()) {
 }
 
 export function buildCard(result, recovery = false) {
-  const label = recovery ? "已恢复" : result.status === "unhealthy" ? "异常" : "未知";
+  const label = recovery ? "已恢复" : result.status === "healthy" ? "正常" : result.status === "unhealthy" ? "异常" : "未知";
   return {
     schema: "2.0",
     config: { update_multi: true },
-    header: { template: recovery ? "green" : "red", title: { tag: "plain_text", content: `NewsRadar 云端健康 · ${label}` } },
+    header: { template: recovery || result.status === "healthy" ? "green" : "red", title: { tag: "plain_text", content: `NewsRadar 云端健康 · ${label}` } },
     body: { elements: [{ tag: "markdown", content:
       `**检查时间：${shanghaiTime(result.checked_at)}（上海）**\n${result.details.join("\n")}` }] },
   };
@@ -177,7 +177,8 @@ export async function scheduled(_controller, env) {
   const recovery = result.status === "healthy" && previous?.alert_open === true;
   const changed = Object.entries(result.issues).some(([key, value]) => rank[value] > (rank[previous?.issues?.[key]] ?? 0));
   const alert = result.status !== "healthy" && (!previous?.alert_open || changed || now - previous.last_alert_at >= REPEAT_MS);
-  if (alert || recovery) {
+  const activation = _controller?.cron === "activation" && previous === null;
+  if (alert || recovery || activation) {
     try { await sendCard(env, result, recovery, now); }
     catch { fail("notification delivery failed; state not advanced"); }
   }
@@ -185,5 +186,5 @@ export async function scheduled(_controller, env) {
     last_alert_at: alert ? now : previous?.last_alert_at ?? null };
   try { await env.HEALTH_MONITOR_STATE.put(STATE_KEY, JSON.stringify(next)); }
   catch { fail("KV state write failed; delivery deduplication not guaranteed"); }
-  console.log(`[cloud-monitor] status=${result.status} notification=${alert || recovery ? "delivered" : "silent"}`);
+  console.log(`[cloud-monitor] status=${result.status} notification=${alert || recovery || activation ? "delivered" : "silent"}`);
 }

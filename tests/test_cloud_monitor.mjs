@@ -228,3 +228,21 @@ test("failed recovery preserves the prior alert and retries on the next check", 
   assert.equal(JSON.parse(f.storage.get(STATE_KEY)).alert_open, false);
   assert.equal(requests.length, 3);
 });
+
+test('authenticated cloud activation sends one real-path card; repeated activation stays silent', async () => {
+  requests = [];
+  const f = fixture();
+  f.env.PREVIEW_PASSWORD = 'fixture-password';
+  const url = 'https://preview.newsradar.ccwu.cc/cloud-health/check';
+  assert.equal((await worker.fetch(new Request(url, {method:'POST'}), f.env)).status, 401);
+  const authorization = 'Basic ' + btoa('newsradar:fixture-password');
+  assert.equal((await worker.fetch(new Request(url, {method:'POST', headers:{Authorization:authorization}}), f.env)).status, 403);
+  for (let count = 0; count < 2; count++) {
+    const response = await worker.fetch(new Request(url, {method:'POST', headers:{Authorization:authorization, 'X-NewsRadar-Health-Check':'1'}}), f.env);
+    assert.equal(response.status, 200);
+    assert.equal((await response.json()).success, true);
+    assert.equal(requests.length, 1);
+  }
+  assert.equal(requests[0].card.header.template, 'green');
+  assert.match(requests[0].card.header.title.content, /正常/);
+});
