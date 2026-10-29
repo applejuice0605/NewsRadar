@@ -3,6 +3,8 @@ from __future__ import annotations
 import copy
 import importlib.util
 import re
+import json
+import tempfile
 import unittest
 from datetime import datetime, timezone
 from pathlib import Path
@@ -16,6 +18,18 @@ SPEC.loader.exec_module(MODULE)
 
 
 class StatusDisplayTest(unittest.TestCase):
+    def test_latest_delivery_check_compares_instants_across_timezones(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            meta = root / 'TrendRadar/output/meta'
+            meta.mkdir(parents=True)
+            (meta / 'delivery_dedup.json').write_text(json.dumps({'accounts': {
+                'older': {'measured_at': '2026-10-29T11:10:00+08:00', 'delivered_blocked_count': 0},
+                'newer': {'measured_at': '2026-10-29T03:11:00+00:00', 'delivered_blocked_count': 2},
+            }}))
+            health, _, _ = MODULE.generate_site_insights(root, root / 'site')
+            self.assertEqual(health['deduplication']['delivery']['delivered_blocked_count'], 2)
+
     def setUp(self) -> None:
         self.health = MODULE.build_public_health(
             {}, now=datetime(2026, 10, 29, 16, 1, 2, tzinfo=timezone.utc)

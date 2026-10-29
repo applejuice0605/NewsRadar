@@ -899,7 +899,7 @@ def generate_site_insights(repo_dir: Path, site_dir: Path, now: datetime | None 
     health = build_public_health(runtime, now=now)
     collection_dedup = _load_json(output_dir / 'meta/collection_dedup.json') or {}
     deliveries = (_load_json(output_dir / 'meta/delivery_dedup.json') or {}).get('accounts', {})
-    delivery_dedup = max(deliveries.values(), key=lambda item: item.get('measured_at', ''), default={})
+    delivery_dedup = max(deliveries.values(), key=lambda item: _parse_datetime(item.get('measured_at')) or datetime.min.replace(tzinfo=timezone.utc), default={})
     health['deduplication'] = {
         'collection': {key: collection_dedup.get(key) for key in ('measured_at', 'candidate_count', 'repeat_count', 'duplicate_rate_percent', 'cross_source_duplicate_count', 'semantic_candidate_pairs')},
         'delivery': {key: delivery_dedup.get(key) for key in ('measured_at', 'delivered_blocked_count', 'candidate_count', 'delivery_status')},
