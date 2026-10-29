@@ -273,8 +273,50 @@ class LocalStorageBackend(SQLiteStorageMixin, StorageBackend):
                 log_parts.append(f"脱榜 {off_list_count} 条")
             print("，".join(log_parts))
             self._record_seen_news(data)
+            self._save_duplicate_metrics(data)
 
         return success
+
+    def _save_duplicate_metrics(self, data: NewsData) -> None:
+        import json
+        from difflib import SequenceMatcher
+        from datetime import datetime, timezone
+        groups = {}
+        total = repeated = cross_source = within_batch = 0
+        for source_id, items in data.items.items():
+            for item in items:
+                total += 1
+                title = self._normalize_seen_title(item.title)
+                prior = any(self._seen_before_current_batch(kind, source_id, key, data.date, data.crawl_time)
+                            for kind, key in self._news_seen_fingerprints(item, source_id))
+                if prior or title in groups:
+                    repeated += 1
+                if title in groups:
+                    within_batch += 1
+                    if source_id not in groups[title]:
+                        cross_source += 1
+                groups.setdefault(title, set()).add(source_id)
+        # Similarity is an observation only; changed versions and metrics stay in the stream.
+        titles = list(groups)
+        semantic_candidates = 0
+        for index, left in enumerate(titles):
+            for right in titles[index + 1:]:
+                if len(left) >= 12 and len(right) >= 12 and left[:4] == right[:4] and SequenceMatcher(None, left, right).ratio() >= .85:
+                    semantic_candidates += 1
+        payload = {
+            'measured_at': datetime.now(timezone.utc).isoformat(),
+            'date': data.date, 'crawl_time': data.crawl_time, 'candidate_count': total,
+            'repeat_count': repeated, 'within_batch_duplicate_count': within_batch,
+            'cross_source_duplicate_count': cross_source,
+            'duplicate_rate_percent': round(repeated / total * 100, 1) if total else None,
+            'semantic_candidate_pairs': semantic_candidates, 'semantic_blocks': 0,
+            'basis': 'hotlist_reobserved_or_same_title_in_batch; semantic_candidates_never_block',
+        }
+        path = self.data_dir / 'meta' / 'collection_dedup.json'
+        path.parent.mkdir(parents=True, exist_ok=True)
+        temporary = path.with_suffix('.tmp')
+        temporary.write_text(json.dumps(payload, ensure_ascii=False, indent=2))
+        temporary.replace(path)
 
     def get_today_all_data(self, date: Optional[str] = None) -> Optional[NewsData]:
         """获取指定日期的所有新闻数据（合并后）"""

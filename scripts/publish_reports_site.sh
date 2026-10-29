@@ -25,10 +25,13 @@ cp "$INDEX_FILE" "$SITE_DIR/index.html"
 rsync -a --exclude='*/notification_test_*.html' "$HTML_DIR/" "$SITE_DIR/reports/"
 if [ -d "$AUDIO_DIR" ]; then
   mkdir -p "$SITE_DIR/audio"
-  rsync -a "$AUDIO_DIR/" "$SITE_DIR/audio/"
+  rsync -a --delete "$AUDIO_DIR/" "$SITE_DIR/audio/"
 fi
 printf "%s\n" "$DOMAIN" > "$SITE_DIR/CNAME"
 touch "$SITE_DIR/.nojekyll"
+if [ -f "$REPO_DIR/scripts/filter_report_history.py" ]; then
+  python3 "$REPO_DIR/scripts/filter_report_history.py" --site-dir "$SITE_DIR"
+fi
 python3 "$REPO_DIR/scripts/generate_reports_archive.py"
 if [ -f "$REPO_DIR/scripts/generate_site_insights.py" ]; then
   python3 "$REPO_DIR/scripts/generate_site_insights.py"

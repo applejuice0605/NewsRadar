@@ -5,6 +5,7 @@ from __future__ import annotations
 
 import argparse
 import html
+import importlib.util
 import json
 import math
 import os
@@ -17,9 +18,14 @@ from datetime import date, datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any, Iterable
 from urllib.parse import quote, urlsplit
+from zoneinfo import ZoneInfo
 
 
 REPO_DIR = Path(__file__).resolve().parents[1]
+_quality_spec = importlib.util.spec_from_file_location("news_quality", REPO_DIR / "TrendRadar/trendradar/ai/news_quality.py")
+_quality_module = importlib.util.module_from_spec(_quality_spec)
+_quality_spec.loader.exec_module(_quality_module)
+peripheral_reason = _quality_module.peripheral_reason
 DEFAULT_SITE_DIR = REPO_DIR / "docs"
 RANGES = (1, 7, 30, 90)
 TOP_ARTICLES_LIMIT = 8
@@ -190,7 +196,7 @@ def build_public_health(raw: dict[str, Any] | None, now: datetime | None = None)
         success is False
         or "failed" in {notification_status, publish_status}
         or bool(source_failed)
-        or (gap_minutes is not None and gap_minutes > int(interval) + 15)
+        or (completed_dt is not None and (now - completed_dt).total_seconds() > (int(interval) + 15) * 60)
     ):
         overall_status = "degraded"
     elif success is True and notification_status != "failed" and publish_status != "failed":
@@ -200,6 +206,7 @@ def build_public_health(raw: dict[str, Any] | None, now: datetime | None = None)
 
     return {
         "generated_at": now.isoformat(),
+        "podcast": _section(raw, "podcast"),
         "overall_status": overall_status,
         "collection": {
             "last_started_at": _iso_time(_first(collection_raw, "last_started_at", "started_at")),
@@ -664,18 +671,61 @@ def _nav(current: str) -> str:
     return "".join(rendered)
 
 
+def _status_time(value: Any) -> str:
+    """Format status timestamps in Shanghai; naive input follows the UTC parser."""
+    candidate = _iso_time(value)
+    parsed = _parse_datetime(candidate)
+    if parsed is None:
+        return "未知"
+    try:
+        return parsed.astimezone(ZoneInfo("Asia/Shanghai")).strftime("%Y-%m-%d %H:%M:%S")
+    except (OverflowError, ValueError):
+        return "未知"
+
+
+def _status_integer(value: Any, suffix: str = "") -> str:
+    """Round display-only durations and intervals without changing machine data."""
+    number = _number(value)
+    return "未知" if number is None else f"{number:.0f}{suffix}"
+
+
 def render_status_html(health: dict[str, Any], pilot: dict[str, Any]) -> str:
     collection = health["collection"]
     notification = health["notification"]
     publish = health["publish"]
     schedule = health["schedule"]
     overall = str(health["overall_status"])
+    podcast = health.get("podcast", {})
+    quality = health.get("quality", {})
     cards = [
-        ("采集", "COLLECT", _status_label("success" if collection["success"] is True else "failed" if collection["success"] is False else "unknown"), _status_class("success" if collection["success"] is True else "failed" if collection["success"] is False else "unknown"), [("最近开始", collection["last_started_at"]), ("最近完成", collection["last_completed_at"]), ("耗时", _display(collection["duration_seconds"], " 秒")), ("成功来源", collection["source_success"]), ("失败来源", collection["source_failed"]), ("条目", collection["item_count"]), ("间隔", _display(collection["gap_minutes"], " 分钟")), ("补采", _display(collection["catch_up"]))]),
-        ("通知", "NOTIFY", _status_label(notification["status"]), _status_class(notification["status"]), [("最近尝试", notification["last_attempt_at"]), ("最近成功", notification["last_success_at"]), ("原因", notification["reason"])]),
-        ("发布", "PUBLISH", _status_label(publish["status"]), _status_class(publish["status"]), [("最近尝试", publish["last_attempt_at"]), ("最近成功", publish["last_success_at"]), ("提交", publish["commit"])]),
-        ("调度", "SCHEDULE", "每 %s 分钟" % schedule["interval_minutes"], "good" if schedule["next_expected_at"] else "unknown", [("下次预期", schedule["next_expected_at"])]),
+        ("采集", "COLLECT", _status_label("success" if collection["success"] is True else "failed" if collection["success"] is False else "unknown"), _status_class("success" if collection["success"] is True else "failed" if collection["success"] is False else "unknown"), [("最近开始", _status_time(collection.get("last_started_at"))), ("最近完成", _status_time(collection.get("last_completed_at"))), ("耗时", _status_integer(collection["duration_seconds"], " 秒")), ("成功来源", collection["source_success"]), ("失败来源", collection["source_failed"]), ("条目", collection["item_count"]), ("间隔", _status_integer(collection["gap_minutes"], " 分钟")), ("补采", _display(collection["catch_up"]))]),
+        ("飞书推送", "FEISHU", _status_label(notification["status"]), _status_class(notification["status"]), [("最近尝试", _status_time(notification.get("last_attempt_at"))), ("最近成功", _status_time(notification.get("last_success_at"))), ("原因", notification["reason"])]),
+        ("AI 播客", "PODCAST", _status_label(podcast.get("status", "unknown")), _status_class(podcast.get("status", "unknown")), [("最新一期", podcast.get("date")), ("生成时间", _status_time(podcast.get("generated_at"))), ("音色", podcast.get("voice"))]),
+        ("发布", "PUBLISH", _status_label(publish["status"]), _status_class(publish["status"]), [("最近尝试", _status_time(publish.get("last_attempt_at"))), ("最近成功", _status_time(publish.get("last_success_at"))), ("提交", publish["commit"])]),
+        ("调度", "SCHEDULE", "每 %s 分钟" % _status_integer(schedule["interval_minutes"]), "good" if schedule.get("next_expected_at") else "unknown", [("下次预期", _status_time(schedule.get("next_expected_at")))]),
     ]
+    cards[0][4].extend([
+        ("统计日期", quality.get("date")),
+        ("推荐相关度（AI自评均分）", _display(quality.get("mean_relevance_percent"), "%")),
+        ("有效推荐占采集比例", _display(quality.get("selection_rate_percent"), "%")),
+        ("推荐 / 原始采集", str(quality.get("accepted_count", 0)) + " / " + str(quality.get("collected_count", 0))),
+        ("已识别周边标题", quality.get("peripheral_count", 0)),
+        ("统计口径", "当天按规范化标题去重；AI分数是标题相关性自评，非人工准确率；未分类原始新闻也计入采集分母"),
+    ])
+    dedup = health.get('deduplication', {})
+    collection_dedup = dedup.get('collection', {})
+    delivery_dedup = dedup.get('delivery', {})
+    cards.append(('重复检查', 'DEDUPLICATION', '精确去重', 'good', [
+        ('最近采集检测', _status_time(collection_dedup.get('measured_at'))),
+        ('本轮重复率', _display(collection_dedup.get('duplicate_rate_percent'), '%')),
+        ('本轮原始条目', collection_dedup.get('candidate_count')),
+        ('本轮重复条目', collection_dedup.get('repeat_count')),
+        ('跨来源重复数', collection_dedup.get('cross_source_duplicate_count')),
+        ('语义相似候选对', collection_dedup.get('semantic_candidate_pairs')),
+        ('最近增量推送检测', _status_time(delivery_dedup.get('measured_at'))),
+        ('已成功推送重复拦截数', delivery_dedup.get('delivered_blocked_count')),
+        ('说明', '重复率含历史已采集或本轮同标题；长时间热榜重复不代表故障。推送拦截按群记录成功送达；语义相似只观察，不拦截事件新进展。未知表示尚未产生检测记录。'),
+    ]))
     pilot_labels = {
         "not_configured": ("未启用", "unknown"),
         "observing": ("观察中", "warn"),
@@ -692,7 +742,7 @@ def render_status_html(health: dict[str, Any], pilot: dict[str, Any]) -> str:
     successful_sources = sum(source["success"] is True for source in pilot["sources"])
     total_items = sum(source["item_count"] or 0 for source in pilot["sources"])
     pilot_rows = [
-        ("最近探测", pilot["generated_at"]),
+        ("最近探测", _status_time(pilot.get("generated_at"))),
         ("可用来源", f"{successful_sources} / {len(pilot['sources'])}"),
         ("候选条目", total_items),
     ]
@@ -714,7 +764,7 @@ def render_status_html(health: dict[str, Any], pilot: dict[str, Any]) -> str:
         details = "".join(f'<div><dt>{html.escape(str(name))}</dt><dd>{html.escape(_display(value))}</dd></div>' for name, value in rows)
         card_html.append(f'<section class="panel status-card"><p class="eyebrow">{eyebrow}</p><div class="card-head"><h2>{title}</h2><span class="badge {klass}">{html.escape(label)}</span></div><dl>{details}</dl></section>')
     return f"""<!doctype html>
-<html lang="zh-CN"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>TrendRadar 运行状态</title><style>{_base_css()}
+<html lang="zh-CN"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>TrendRadar 运行状态</title><link rel="icon" type="image/png" sizes="32x32" href="/assets/brand/favicon-32.png"><link rel="apple-touch-icon" sizes="180x180" href="/assets/brand/apple-touch-icon.png"><style>{_base_css()}
     .overview {{ display:flex; align-items:center; justify-content:space-between; gap:16px; flex-wrap:wrap; margin-bottom:20px; background:var(--yellow); }}
     .overview h2 {{ margin-bottom:4px; font-size:clamp(24px,4vw,38px); }}
     .overview .badge {{ min-height:44px; font-size:18px; }}
@@ -722,14 +772,14 @@ def render_status_html(health: dict[str, Any], pilot: dict[str, Any]) -> str:
     .card-head {{ display:flex; justify-content:space-between; align-items:center; gap:12px; }} .card-head h2 {{ margin:0; font-size:26px; }}
     dl {{ margin:18px 0 0; }} dl div {{ display:grid; grid-template-columns:minmax(110px,.7fr) minmax(0,1.3fr); gap:12px; padding:10px 0; border-top:3px solid var(--ink); }} dt {{ font-weight:900; }} dd {{ margin:0; overflow-wrap:anywhere; }}
     @media(max-width:760px) {{ .status-grid {{ grid-template-columns:1fr; }} }}
-    </style></head><body><a class="skip-link" href="#main-content">跳到正文</a><main class="shell" id="main-content"><header class="masthead"><div class="masthead-row"><div><h1>System Status</h1><p class="subtitle">TrendRadar 采集、通知与发布状态</p></div><nav aria-label="主导航">{_nav("status")}</nav></div></header>
-    <section class="panel overview"><div><p class="eyebrow">OVERALL</p><h2>系统总览</h2><p class="meta">生成于 {html.escape(health["generated_at"])}</p></div><span class="badge {_status_class(overall)}">{html.escape(_status_label(overall))}</span></section>
+    </style></head><body><a class="skip-link" href="#main-content">跳到正文</a><main class="shell" id="main-content"><header class="masthead"><div class="masthead-row"><div><h1>System Status</h1><p class="subtitle">TrendRadar 采集、通知与发布状态 · 北京时间（Asia/Shanghai）</p></div><nav aria-label="主导航">{_nav("status")}</nav></div></header>
+    <section class="panel overview"><div><p class="eyebrow">OVERALL</p><h2>系统总览</h2><p class="meta">生成于 {html.escape(_status_time(health.get("generated_at")))}</p></div><span class="badge {_status_class(overall)}">{html.escape(_status_label(overall))}</span></section>
     <div class="status-grid">{"".join(card_html)}</div></main></body></html>"""
 
 
 def render_trends_html(trends: dict[str, Any]) -> str:
     return f"""<!doctype html>
-<html lang="zh-CN"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>TrendRadar 趋势洞察</title><style>{_base_css()}
+<html lang="zh-CN"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>TrendRadar 趋势洞察</title><link rel="icon" type="image/png" sizes="32x32" href="/assets/brand/favicon-32.png"><link rel="apple-touch-icon" sizes="180x180" href="/assets/brand/apple-touch-icon.png"><style>{_base_css()}
     .controls {{ display:grid; grid-template-columns:auto minmax(180px,1fr) minmax(160px,.55fr); gap:16px; align-items:end; margin-bottom:22px; background:var(--yellow); }}
     .range-switch {{ display:flex; gap:8px; flex-wrap:wrap; }} .range-switch button[aria-pressed="true"] {{ background:var(--blue); color:var(--white); }}
     label {{ display:grid; gap:5px; font-weight:900; }}
@@ -785,7 +835,7 @@ def render_sources_html(feed: dict[str, Any]) -> str:
             f'<h2>{html.escape(group["source"])}</h2></div><span class="badge">{len(group["items"])} 条</span></div>'
             f'<div class="source-items">{"".join(articles) or "<p>本轮没有可展示条目。</p>"}</div></section>'
         )
-    return f"""<!doctype html><html lang="zh-CN"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>TrendRadar 候选源观察</title><style>{_base_css().rstrip()}
+    return f"""<!doctype html><html lang="zh-CN"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>TrendRadar 候选源观察</title><link rel="icon" type="image/png" sizes="32x32" href="/assets/brand/favicon-32.png"><link rel="apple-touch-icon" sizes="180x180" href="/assets/brand/apple-touch-icon.png"><style>{_base_css().rstrip()}
     .notice {{ margin-bottom:20px; background:var(--yellow); }} .notice p {{ margin:6px 0 0; font-weight:800; }}
     .source-group {{ margin-bottom:22px; }} .source-head {{ display:flex; align-items:center; justify-content:space-between; gap:12px; }} .source-head h2 {{ margin:0; font-size:28px; overflow-wrap:anywhere; }}
     .source-items {{ margin-top:16px; }} .source-item {{ display:grid; grid-template-columns:minmax(0,1fr) auto; gap:14px; align-items:center; padding:12px 0; border-top:3px solid var(--ink); }}
@@ -815,14 +865,51 @@ def _atomic_write(path: Path, content: str) -> None:
                 pass
 
 
+def build_quality_metrics(articles, day, minimum=0.7):
+    unique = {}
+    for article in articles:
+        if article["date"] != day:
+            continue
+        title = re.sub(r"\s+", "", article["title"]).casefold()
+        score = max((float(score) for _tag, score in article.get("tags", [])), default=0)
+        if title not in unique or score > unique[title][1]:
+            unique[title] = (article["title"], score)
+    accepted = [score for title, score in unique.values() if score >= minimum and not peripheral_reason(title)]
+    return {
+        "date": day.isoformat(), "collected_count": len(unique), "accepted_count": len(accepted),
+        "mean_relevance_percent": round(sum(accepted) / len(accepted) * 100, 1) if accepted else None,
+        "selection_rate_percent": round(len(accepted) / len(unique) * 100, 1) if unique else None,
+        "peripheral_count": sum(bool(peripheral_reason(title)) for title, _score in unique.values()),
+        "minimum_score": minimum, "basis": "title_only_model_self_score_not_accuracy",
+    }
+
+
 def generate_site_insights(repo_dir: Path, site_dir: Path, now: datetime | None = None) -> tuple[dict[str, Any], dict[str, Any], list[str]]:
     output_dir = repo_dir / "TrendRadar" / "output"
-    health = build_public_health(_load_json(output_dir / "meta" / "runtime_health.json"), now=now)
+    runtime = _load_json(output_dir / "meta" / "runtime_health.json") or {}
+    podcast = _load_json(output_dir / "audio" / "latest.json") or {}
+    expected = (now or _utc_now()).astimezone(ZoneInfo("Asia/Shanghai"))
+    expected_day = expected.date() if expected.hour >= 22 else expected.date() - timedelta(days=1)
+    audio_file = output_dir / str(podcast.get("audio_url", "")).lstrip("/")
+    runtime["podcast"] = {
+        "date": podcast.get("date"), "generated_at": podcast.get("generated_at"),
+        "voice": podcast.get("voice_label", podcast.get("voice")),
+        "status": "success" if podcast.get("date", "") >= expected_day.isoformat() and audio_file.is_file() and audio_file.stat().st_size > 1000 else "failed",
+    }
+    health = build_public_health(runtime, now=now)
+    collection_dedup = _load_json(output_dir / 'meta/collection_dedup.json') or {}
+    deliveries = (_load_json(output_dir / 'meta/delivery_dedup.json') or {}).get('accounts', {})
+    delivery_dedup = max(deliveries.values(), key=lambda item: item.get('measured_at', ''), default={})
+    health['deduplication'] = {
+        'collection': {key: collection_dedup.get(key) for key in ('measured_at', 'candidate_count', 'repeat_count', 'duplicate_rate_percent', 'cross_source_duplicate_count', 'semantic_candidate_pairs')},
+        'delivery': {key: delivery_dedup.get(key) for key in ('measured_at', 'delivered_blocked_count', 'candidate_count', 'delivery_status')},
+    }
     pilot = build_public_pilot(_load_json(output_dir / "source-pilot" / "latest.json"))
     source_feed = build_public_source_feed(_load_json(output_dir / "source-pilot" / "latest.json"))
     health["source_pilot"] = pilot
     articles, skipped = load_articles(output_dir)
-    trends = build_trends(articles, now=now)
+    health["quality"] = build_quality_metrics(articles, expected.date())
+    trends = build_trends([article for article in articles if not peripheral_reason(article['title'])], now=now)
     outputs = {
         site_dir / "health.json": _json_text(health),
         site_dir / "trends.json": _json_text(trends),

@@ -13,6 +13,7 @@
 from __future__ import annotations
 
 import time
+from pathlib import Path
 from typing import TYPE_CHECKING, Any, Callable, Dict, List, Optional
 
 from trendradar.core.config import (
@@ -33,6 +34,7 @@ from .senders import (
     send_to_wework,
     send_to_generic_webhook,
 )
+from .dedup import DeliveryLedger, save_delivery_metrics
 
 
 # 类型检查时导入，运行时不导入（避免循环导入）
@@ -436,27 +438,44 @@ class NotificationDispatcher:
             report_data, display_regions, rss_items, rss_new_items, ai_analysis, standalone_data
         )
 
+        def deliver(url, account_label):
+            output = Path(self.config.get('STORAGE', {}).get('LOCAL', {}).get('DATA_DIR', 'output'))
+            ledger = DeliveryLedger(output / 'delivery_ledger.db', url)
+            try:
+                # Daily summaries intentionally include already delivered news.
+                if mode == 'incremental':
+                    data, feeds, new_feeds, selected, metrics = ledger.filter_payload(rd, ri, rn)
+                    metrics['delivery_status'] = 'not_attempted'
+                    save_delivery_metrics(output / 'meta', ledger.account, metrics)
+                    if not selected and not sd:
+                        print('[推送去重] 增量内容均重复，跳过飞书发送')
+                        return False
+                else:
+                    data, feeds, new_feeds = rd, ri, rn
+                    _rd, _ri, _rn, selected, _metrics = ledger.filter_payload(rd, ri, rn, block_delivered=False)
+                success = send_to_feishu(
+                    webhook_url=url, report_data=data, report_type=report_type,
+                    update_info=update_info, proxy_url=proxy_url, mode=mode,
+                    account_label=account_label,
+                    batch_size=self.config.get('FEISHU_BATCH_SIZE', 29000),
+                    batch_interval=self.config.get('BATCH_SEND_INTERVAL', 1.0),
+                    split_content_func=self.split_content_func, get_time_func=self.get_time_func,
+                    rss_items=feeds, rss_new_items=new_feeds, ai_analysis=ai,
+                    display_regions=display_regions or {}, standalone_data=sd,
+                )
+                if success:
+                    ledger.record_success(selected)
+                if mode == 'incremental':
+                    metrics['delivery_status'] = 'success' if success else 'failed'
+                    save_delivery_metrics(output / 'meta', ledger.account, metrics)
+                return success
+            finally:
+                ledger.close()
+
         return self._send_to_multi_accounts(
             channel_name="飞书",
             config_value=self.config["FEISHU_WEBHOOK_URL"],
-            send_func=lambda url, account_label: send_to_feishu(
-                webhook_url=url,
-                report_data=rd,
-                report_type=report_type,
-                update_info=update_info,
-                proxy_url=proxy_url,
-                mode=mode,
-                account_label=account_label,
-                batch_size=self.config.get("FEISHU_BATCH_SIZE", 29000),
-                batch_interval=self.config.get("BATCH_SEND_INTERVAL", 1.0),
-                split_content_func=self.split_content_func,
-                get_time_func=self.get_time_func,
-                rss_items=ri,
-                rss_new_items=rn,
-                ai_analysis=ai,
-                display_regions=display_regions or {},
-                standalone_data=sd,
-            ),
+            send_func=deliver,
         )
 
     def _send_dingtalk(

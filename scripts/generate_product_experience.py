@@ -15,7 +15,7 @@ from pathlib import Path
 from typing import Any
 from urllib.parse import parse_qsl, urlencode, urlsplit, urlunsplit
 
-from generate_site_insights import load_articles
+from generate_site_insights import load_articles, peripheral_reason
 
 
 REPO_DIR = Path(__file__).resolve().parents[1]
@@ -272,6 +272,7 @@ def _notification_preview(events: list[dict[str, Any]], records_by_id: dict[str,
 def build_experience(repo_dir: Path, now: datetime | None = None) -> dict[str, Any]:
     now = now or _now()
     raw_articles, skipped = load_articles(repo_dir / "TrendRadar" / "output")
+    raw_articles = [article for article in raw_articles if not peripheral_reason(article['title'])]
     as_of = max((item["date"] for item in raw_articles), default=now.date())
     all_records = _deduplicate_records([_article_record(item, as_of) for item in raw_articles])
     all_events = _events(all_records)
@@ -293,9 +294,11 @@ def build_experience(repo_dir: Path, now: datetime | None = None) -> dict[str, A
     included_ids.update(article_id for event in events for article_id in event["article_ids"])
     records = [record for record in all_records if record["id"] in included_ids]
     records_by_id = {record["id"]: record for record in records}
-    global_important = sorted(today, key=lambda item: item["score"]["total"], reverse=True)[:8]
+    recommended = [record for record in today if not peripheral_reason(record["title"])
+                   and max((tag["relevance"] for tag in record["tags"]), default=0) >= 0.7]
+    global_important = sorted(recommended, key=lambda item: item["score"]["total"], reverse=True)[:8]
     personalized = sorted(
-        today,
+        recommended,
         key=lambda item: (item["score"]["components"]["interest"], item["score"]["total"]),
         reverse=True,
     )[:8]
