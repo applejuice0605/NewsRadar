@@ -19,7 +19,7 @@ class Node:
 
     @property
     def classes(self):
-        return set(self.attrs.get('class', '').split())
+        return set((self.attrs.get('class') or '').split())
 
     def descendants(self):
         for child in self.children:
@@ -119,6 +119,7 @@ def clean_report(source):
     updated = Document(source)
     updated_nodes = list(updated.root.descendants())
     counts = {}
+    hotlist_count = sum('news-item' in item.classes for item in updated_nodes)
     for group in updated_nodes:
         if 'word-group' in group.classes and 'data-tab-index' in group.attrs:
             counts[group.attrs['data-tab-index']] = sum('news-item' in item.classes for item in group.descendants())
@@ -130,7 +131,7 @@ def clean_report(source):
             if labels and values and labels[0].text.strip() == '热榜命中':
                 value = values[0]
                 original = source[value.start:value.end]
-                repairs.append((value.start, value.end, re.sub(r'(>\s*)\d+', lambda m: m[1] + str(sum(counts.values())), original, count=1)))
+                repairs.append((value.start, value.end, re.sub(r'(>\s*)\d+', lambda m: m[1] + str(hotlist_count), original, count=1)))
         if 'new-section-title' in node.classes and node.end:
             parent = node.parent
             count = sum('new-item' in child.classes for child in parent.descendants())
