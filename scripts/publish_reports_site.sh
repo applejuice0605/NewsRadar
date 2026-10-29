@@ -29,6 +29,9 @@ if [ -d "$AUDIO_DIR" ]; then
 fi
 printf "%s\n" "$DOMAIN" > "$SITE_DIR/CNAME"
 touch "$SITE_DIR/.nojekyll"
+if [ -f "$REPO_DIR/scripts/filter_report_history.py" ]; then
+  python3 "$REPO_DIR/scripts/filter_report_history.py" --site-dir "$SITE_DIR"
+fi
 python3 "$REPO_DIR/scripts/generate_reports_archive.py"
 if [ -f "$REPO_DIR/scripts/generate_site_insights.py" ]; then
   python3 "$REPO_DIR/scripts/generate_site_insights.py"

@@ -671,6 +671,24 @@ def _nav(current: str) -> str:
     return "".join(rendered)
 
 
+def _status_time(value: Any) -> str:
+    """Format status timestamps in Shanghai; naive input follows the UTC parser."""
+    candidate = _iso_time(value)
+    parsed = _parse_datetime(candidate)
+    if parsed is None:
+        return "未知"
+    try:
+        return parsed.astimezone(ZoneInfo("Asia/Shanghai")).strftime("%Y-%m-%d %H:%M:%S")
+    except (OverflowError, ValueError):
+        return "未知"
+
+
+def _status_integer(value: Any, suffix: str = "") -> str:
+    """Round display-only durations and intervals without changing machine data."""
+    number = _number(value)
+    return "未知" if number is None else f"{number:.0f}{suffix}"
+
+
 def render_status_html(health: dict[str, Any], pilot: dict[str, Any]) -> str:
     collection = health["collection"]
     notification = health["notification"]
@@ -680,11 +698,11 @@ def render_status_html(health: dict[str, Any], pilot: dict[str, Any]) -> str:
     podcast = health.get("podcast", {})
     quality = health.get("quality", {})
     cards = [
-        ("采集", "COLLECT", _status_label("success" if collection["success"] is True else "failed" if collection["success"] is False else "unknown"), _status_class("success" if collection["success"] is True else "failed" if collection["success"] is False else "unknown"), [("最近开始", collection["last_started_at"]), ("最近完成", collection["last_completed_at"]), ("耗时", _display(collection["duration_seconds"], " 秒")), ("成功来源", collection["source_success"]), ("失败来源", collection["source_failed"]), ("条目", collection["item_count"]), ("间隔", _display(collection["gap_minutes"], " 分钟")), ("补采", _display(collection["catch_up"]))]),
-        ("飞书推送", "FEISHU", _status_label(notification["status"]), _status_class(notification["status"]), [("最近尝试", notification["last_attempt_at"]), ("最近成功", notification["last_success_at"]), ("原因", notification["reason"])]),
-        ("AI 播客", "PODCAST", _status_label(podcast.get("status", "unknown")), _status_class(podcast.get("status", "unknown")), [("最新一期", podcast.get("date")), ("生成时间", podcast.get("generated_at")), ("音色", podcast.get("voice"))]),
-        ("发布", "PUBLISH", _status_label(publish["status"]), _status_class(publish["status"]), [("最近尝试", publish["last_attempt_at"]), ("最近成功", publish["last_success_at"]), ("提交", publish["commit"])]),
-        ("调度", "SCHEDULE", "每 %s 分钟" % schedule["interval_minutes"], "good" if schedule["next_expected_at"] else "unknown", [("下次预期", schedule["next_expected_at"])]),
+        ("采集", "COLLECT", _status_label("success" if collection["success"] is True else "failed" if collection["success"] is False else "unknown"), _status_class("success" if collection["success"] is True else "failed" if collection["success"] is False else "unknown"), [("最近开始", _status_time(collection.get("last_started_at"))), ("最近完成", _status_time(collection.get("last_completed_at"))), ("耗时", _status_integer(collection["duration_seconds"], " 秒")), ("成功来源", collection["source_success"]), ("失败来源", collection["source_failed"]), ("条目", collection["item_count"]), ("间隔", _status_integer(collection["gap_minutes"], " 分钟")), ("补采", _display(collection["catch_up"]))]),
+        ("飞书推送", "FEISHU", _status_label(notification["status"]), _status_class(notification["status"]), [("最近尝试", _status_time(notification.get("last_attempt_at"))), ("最近成功", _status_time(notification.get("last_success_at"))), ("原因", notification["reason"])]),
+        ("AI 播客", "PODCAST", _status_label(podcast.get("status", "unknown")), _status_class(podcast.get("status", "unknown")), [("最新一期", podcast.get("date")), ("生成时间", _status_time(podcast.get("generated_at"))), ("音色", podcast.get("voice"))]),
+        ("发布", "PUBLISH", _status_label(publish["status"]), _status_class(publish["status"]), [("最近尝试", _status_time(publish.get("last_attempt_at"))), ("最近成功", _status_time(publish.get("last_success_at"))), ("提交", publish["commit"])]),
+        ("调度", "SCHEDULE", "每 %s 分钟" % _status_integer(schedule["interval_minutes"]), "good" if schedule.get("next_expected_at") else "unknown", [("下次预期", _status_time(schedule.get("next_expected_at")))]),
     ]
     cards[0][4].extend([
         ("统计日期", quality.get("date")),
@@ -694,6 +712,20 @@ def render_status_html(health: dict[str, Any], pilot: dict[str, Any]) -> str:
         ("已识别周边标题", quality.get("peripheral_count", 0)),
         ("统计口径", "当天按规范化标题去重；AI分数是标题相关性自评，非人工准确率；未分类原始新闻也计入采集分母"),
     ])
+    dedup = health.get('deduplication', {})
+    collection_dedup = dedup.get('collection', {})
+    delivery_dedup = dedup.get('delivery', {})
+    cards.append(('重复检查', 'DEDUPLICATION', '精确去重', 'good', [
+        ('最近采集检测', _status_time(collection_dedup.get('measured_at'))),
+        ('本轮重复率', _display(collection_dedup.get('duplicate_rate_percent'), '%')),
+        ('本轮原始条目', collection_dedup.get('candidate_count')),
+        ('本轮重复条目', collection_dedup.get('repeat_count')),
+        ('跨来源重复数', collection_dedup.get('cross_source_duplicate_count')),
+        ('语义相似候选对', collection_dedup.get('semantic_candidate_pairs')),
+        ('最近增量推送检测', _status_time(delivery_dedup.get('measured_at'))),
+        ('已成功推送重复拦截数', delivery_dedup.get('delivered_blocked_count')),
+        ('说明', '重复率含历史已采集或本轮同标题；长时间热榜重复不代表故障。推送拦截按群记录成功送达；语义相似只观察，不拦截事件新进展。未知表示尚未产生检测记录。'),
+    ]))
     pilot_labels = {
         "not_configured": ("未启用", "unknown"),
         "observing": ("观察中", "warn"),
@@ -710,7 +742,7 @@ def render_status_html(health: dict[str, Any], pilot: dict[str, Any]) -> str:
     successful_sources = sum(source["success"] is True for source in pilot["sources"])
     total_items = sum(source["item_count"] or 0 for source in pilot["sources"])
     pilot_rows = [
-        ("最近探测", pilot["generated_at"]),
+        ("最近探测", _status_time(pilot.get("generated_at"))),
         ("可用来源", f"{successful_sources} / {len(pilot['sources'])}"),
         ("候选条目", total_items),
     ]
@@ -740,8 +772,8 @@ def render_status_html(health: dict[str, Any], pilot: dict[str, Any]) -> str:
     .card-head {{ display:flex; justify-content:space-between; align-items:center; gap:12px; }} .card-head h2 {{ margin:0; font-size:26px; }}
     dl {{ margin:18px 0 0; }} dl div {{ display:grid; grid-template-columns:minmax(110px,.7fr) minmax(0,1.3fr); gap:12px; padding:10px 0; border-top:3px solid var(--ink); }} dt {{ font-weight:900; }} dd {{ margin:0; overflow-wrap:anywhere; }}
     @media(max-width:760px) {{ .status-grid {{ grid-template-columns:1fr; }} }}
-    </style></head><body><a class="skip-link" href="#main-content">跳到正文</a><main class="shell" id="main-content"><header class="masthead"><div class="masthead-row"><div><h1>System Status</h1><p class="subtitle">TrendRadar 采集、通知与发布状态</p></div><nav aria-label="主导航">{_nav("status")}</nav></div></header>
-    <section class="panel overview"><div><p class="eyebrow">OVERALL</p><h2>系统总览</h2><p class="meta">生成于 {html.escape(health["generated_at"])}</p></div><span class="badge {_status_class(overall)}">{html.escape(_status_label(overall))}</span></section>
+    </style></head><body><a class="skip-link" href="#main-content">跳到正文</a><main class="shell" id="main-content"><header class="masthead"><div class="masthead-row"><div><h1>System Status</h1><p class="subtitle">TrendRadar 采集、通知与发布状态 · 北京时间（Asia/Shanghai）</p></div><nav aria-label="主导航">{_nav("status")}</nav></div></header>
+    <section class="panel overview"><div><p class="eyebrow">OVERALL</p><h2>系统总览</h2><p class="meta">生成于 {html.escape(_status_time(health.get("generated_at")))}</p></div><span class="badge {_status_class(overall)}">{html.escape(_status_label(overall))}</span></section>
     <div class="status-grid">{"".join(card_html)}</div></main></body></html>"""
 
 
@@ -865,12 +897,19 @@ def generate_site_insights(repo_dir: Path, site_dir: Path, now: datetime | None 
         "status": "success" if podcast.get("date", "") >= expected_day.isoformat() and audio_file.is_file() and audio_file.stat().st_size > 1000 else "failed",
     }
     health = build_public_health(runtime, now=now)
+    collection_dedup = _load_json(output_dir / 'meta/collection_dedup.json') or {}
+    deliveries = (_load_json(output_dir / 'meta/delivery_dedup.json') or {}).get('accounts', {})
+    delivery_dedup = max(deliveries.values(), key=lambda item: item.get('measured_at', ''), default={})
+    health['deduplication'] = {
+        'collection': {key: collection_dedup.get(key) for key in ('measured_at', 'candidate_count', 'repeat_count', 'duplicate_rate_percent', 'cross_source_duplicate_count', 'semantic_candidate_pairs')},
+        'delivery': {key: delivery_dedup.get(key) for key in ('measured_at', 'delivered_blocked_count', 'candidate_count', 'delivery_status')},
+    }
     pilot = build_public_pilot(_load_json(output_dir / "source-pilot" / "latest.json"))
     source_feed = build_public_source_feed(_load_json(output_dir / "source-pilot" / "latest.json"))
     health["source_pilot"] = pilot
     articles, skipped = load_articles(output_dir)
     health["quality"] = build_quality_metrics(articles, expected.date())
-    trends = build_trends(articles, now=now)
+    trends = build_trends([article for article in articles if not peripheral_reason(article['title'])], now=now)
     outputs = {
         site_dir / "health.json": _json_text(health),
         site_dir / "trends.json": _json_text(trends),

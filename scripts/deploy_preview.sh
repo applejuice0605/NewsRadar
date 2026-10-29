@@ -28,6 +28,7 @@ python3 "$REPO_DIR/scripts/prepare_preview_site.py" \
   --data-repo "$DATA_REPO" \
   --source "$SOURCE_DIR" \
   --destination "$PREVIEW_DIR"
+python3 "$REPO_DIR/scripts/filter_report_history.py" --site-dir "$PREVIEW_DIR"
 
 # Preview presentation assets come from staging, while reports and audio come
 # from the live collector worktree so feature testing never freezes old news.

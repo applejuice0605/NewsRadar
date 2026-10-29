@@ -272,6 +272,7 @@ def _notification_preview(events: list[dict[str, Any]], records_by_id: dict[str,
 def build_experience(repo_dir: Path, now: datetime | None = None) -> dict[str, Any]:
     now = now or _now()
     raw_articles, skipped = load_articles(repo_dir / "TrendRadar" / "output")
+    raw_articles = [article for article in raw_articles if not peripheral_reason(article['title'])]
     as_of = max((item["date"] for item in raw_articles), default=now.date())
     all_records = _deduplicate_records([_article_record(item, as_of) for item in raw_articles])
     all_events = _events(all_records)
