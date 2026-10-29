@@ -57,6 +57,11 @@ python3 "$REPO_DIR/scripts/apply_site_features.py" \
   --sources "${NEWSRADAR_FEATURE_SOURCES:-}" \
   --experience "${NEWSRADAR_FEATURE_EXPERIENCE:-}"
 
+# Explicit smoke-test artifact only; never overwrite the live daily report.
+if [ -f "$REPO_DIR/.deploy/first-batch/analysis-preview.html" ]; then
+  cp "$REPO_DIR/.deploy/first-batch/analysis-preview.html" "$PREVIEW_DIR/analysis-preview.html"
+fi
+
 echo "[preview] deploying newsradar-preview"
 npx wrangler deploy --env preview
 echo "[preview] deployed: https://preview.newsradar.ccwu.cc"

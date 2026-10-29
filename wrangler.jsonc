@@ -13,6 +13,10 @@
       "main": "./workers/preview-auth.mjs",
       "workers_dev": true,
       "preview_urls": false,
+      "triggers": { "crons": [] },
+      "kv_namespaces": [
+        { "binding": "HEALTH_MONITOR_STATE", "id": "b3e8906ca0f9442db9640a006af2eade" }
+      ],
       "routes": [
         {
           "pattern": "preview.newsradar.ccwu.cc",

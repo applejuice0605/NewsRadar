@@ -1,3 +1,5 @@
+import { scheduled, inspectHealth } from "./dashboard-monitor.mjs";
+
 const USERNAME = "newsradar";
 
 function unauthorized() {
@@ -71,6 +73,7 @@ async function withByteRange(request, response) {
 }
 
 export default {
+  scheduled,
   async fetch(request, env) {
     if (!env.PREVIEW_PASSWORD) {
       return new Response("Preview authentication is not configured.\n", {
@@ -83,6 +86,13 @@ export default {
     const expected = `Basic ${btoa(`${USERNAME}:${env.PREVIEW_PASSWORD}`)}`;
     if (!(await secureEqual(actual, expected))) {
       return unauthorized();
+    }
+
+    if (new URL(request.url).pathname === '/cloud-health.json' && request.method === 'GET') {
+      const report = await inspectHealth(env);
+      return Response.json({ ...report, scheduler_enabled: env.HEALTH_MONITOR_ENABLED === 'true',
+        last_scheduled_check: await env.HEALTH_MONITOR_STATE?.get('dashboard-monitor:v1', 'json') ?? null },
+        { headers: { 'Cache-Control': 'no-store', 'X-Robots-Tag': 'noindex, nofollow' } });
     }
 
     return withByteRange(request, await env.ASSETS.fetch(request));

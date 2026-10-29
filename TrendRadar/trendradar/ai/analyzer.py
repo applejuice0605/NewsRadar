@@ -10,6 +10,7 @@ import json
 from dataclasses import dataclass, field
 from typing import Any, Callable, Dict, List, NamedTuple, Optional
 
+from trendradar.ai.evidence import ground_analysis, safe_source_url
 from trendradar.ai.client import AIClient
 from trendradar.ai.prompt_loader import load_prompt_template
 
@@ -24,6 +25,10 @@ class AIAnalysisResult:
     rss_insights: str = ""               # RSS 深度洞察
     outlook_strategy: str = ""           # 研判与策略建议
     standalone_summaries: Dict[str, str] = field(default_factory=dict)  # 独立展示区概括 {源ID: 概括}
+
+    evidence_claims: List[Dict] = field(default_factory=list)
+    evidence_sources: Dict[str, Dict] = field(default_factory=dict)
+    evidence_rejected_count: int = 0
 
     # 基础元数据
     raw_response: str = ""               # 原始响应
@@ -149,6 +154,7 @@ class AIAnalyzer:
             )
 
         # 准备新闻内容并获取统计数据
+        self._evidence_sources = {}
         prepared = self._prepare_news_content(stats, rss_stats)
         total_news = prepared.hotlist_total + prepared.rss_total
 
@@ -225,6 +231,8 @@ class AIAnalyzer:
             # 如果配置未启用 standalone 分析，强制清空
             if not self.include_standalone:
                 result.standalone_summaries = {}
+
+            result = ground_analysis(result, self._evidence_sources)
 
             # 填充统计数据
             result.total_news = total_news
@@ -312,7 +320,7 @@ class AIAnalyzer:
                             timeline_str = self._format_rank_timeline(rank_timeline)
                             line += f" | 轨迹:{timeline_str}"
 
-                        news_lines.append(line)
+                        news_lines.append(self._register_evidence(t, source, line))
 
                         news_count += 1
                         if news_count >= self.max_news:
@@ -350,7 +358,7 @@ class AIAnalyzer:
                             line = f"- {title}"
                         if time_display:
                             line += f" | {time_display}"
-                        rss_lines.append(line)
+                        rss_lines.append(self._register_evidence(t, source, line))
 
                         rss_count += 1
                         if rss_count >= remaining:
@@ -369,6 +377,18 @@ class AIAnalyzer:
             hotlist_analyzed=news_count,
             rss_analyzed=rss_count,
         )
+
+    def _register_evidence(self, item, source, line):
+        if not hasattr(self, '_evidence_sources'):
+            self._evidence_sources = {}
+        source_id = f"N{len(self._evidence_sources) + 1:03d}"
+        record = {'title': str(item.get('title', '')),
+                  'source': str(source),
+                  'url': safe_source_url(item.get('url') or item.get('link') or ''),
+                  'summary': str(item.get('summary') or '')[:2000]}
+        self._evidence_sources[source_id] = record
+        # JSON-escape untrusted title/summary, including newlines and markup.
+        return json.dumps({'id': source_id, **record, 'observations': line}, ensure_ascii=False)
 
     def _call_ai(self, user_prompt: str) -> str:
         """调用 AI API（使用 LiteLLM）"""
@@ -522,7 +542,7 @@ class AIAnalyzer:
                         timeline_str = self._format_rank_timeline(rank_timeline)
                         line += f" | 轨迹:{timeline_str}"
 
-                lines.append(line)
+                lines.append(self._register_evidence(item, platform_name, line))
             lines.append("")
 
         # RSS 源
@@ -544,7 +564,7 @@ class AIAnalyzer:
                 if published_at:
                     line += f" | {published_at}"
 
-                lines.append(line)
+                lines.append(self._register_evidence(item, feed_name, line))
             lines.append("")
 
         standalone_count = sum(
@@ -622,6 +642,8 @@ class AIAnalyzer:
 
         # 解析成功，提取字段
         try:
+            claims = data.get("evidence_claims", [])
+            result.evidence_claims = claims if isinstance(claims, list) else []
             result.core_trends = data.get("core_trends", "")
             result.sentiment_controversy = data.get("sentiment_controversy", "")
             result.signals = data.get("signals", "")

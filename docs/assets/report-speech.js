@@ -6,6 +6,16 @@
     'zh-CN-XiaoxiaoNeural': '晓晓 · 中文女声'
   };
 
+  function chinaTime(value) {
+    if (!value) return '未知';
+    var parsed = new Date(value);
+    if (!Number.isFinite(parsed.getTime())) return '未知';
+    return new Intl.DateTimeFormat('sv-SE', {
+      timeZone: 'Asia/Shanghai', year: 'numeric', month: '2-digit', day: '2-digit',
+      hour: '2-digit', minute: '2-digit', second: '2-digit', hour12: false
+    }).format(parsed);
+  }
+
   function reportDate() {
     var pathMatch = window.location.pathname.match(/\/reports\/(\d{4}-\d{2}-\d{2})(?:\/|\.html)/);
     if (pathMatch) return pathMatch[1];
@@ -37,6 +47,14 @@
     heading.className = 'speech-panel-head';
     heading.innerHTML = '<h2 class="speech-panel-title" id="podcastTitle">今日 AI 新闻播报</h2>' +
       '<span class="speech-badge">AI 播客</span>';
+    var reportStamp = document.createElement('p');
+    reportStamp.className = 'podcast-report-time';
+    var reportInfo = Array.from(document.querySelectorAll('.info-item')).find(function (item) {
+      var label = item.querySelector('.info-label');
+      return label && label.textContent.trim() === '生成时间';
+    });
+    var reportValue = reportInfo && reportInfo.querySelector('.info-value');
+    reportStamp.textContent = '新闻报告更新：' + (reportValue ? reportValue.textContent.trim() + '（北京时间）' : '请查看报告顶部生成时间');
     var body = document.createElement('div');
     if (available) {
       body.className = 'podcast-slot';
@@ -48,8 +66,12 @@
       audio.setAttribute('aria-label', metadata.date + ' AI 新闻播报');
       var meta = document.createElement('span');
       meta.className = 'podcast-meta';
-      meta.textContent = metadata.date + ' · ' +
+      meta.textContent = '播报日期：' + metadata.date + ' · ' +
         (metadata.voice_label || VOICE_LABELS[metadata.voice] || '自然中文语音');
+      var generated = document.createElement('span');
+      generated.className = 'podcast-generated';
+      generated.textContent = '音频生成：' + chinaTime(metadata.generated_at) + '（北京时间）';
+      meta.appendChild(generated);
       body.append(audio, meta);
       if (Array.isArray(metadata.chapters) && metadata.chapters.length) {
         var chapters = document.createElement('div');
@@ -109,7 +131,7 @@
         : '当天 AI 日报完成后会自动生成并显示在这里。';
       body.append(message, detail);
     }
-    section.append(heading, body);
+    section.append(heading, reportStamp, body);
     return section;
   }
 
