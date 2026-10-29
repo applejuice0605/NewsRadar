@@ -36,6 +36,7 @@ class Document(HTMLParser):
         self.lines = [0] + [i + 1 for i, char in enumerate(source) if char == '\n']
         self.root = Node('root', [], 0)
         self.stack = [self.root]
+        self.body_end = None
         self.feed(source)
 
     def position(self):
@@ -57,6 +58,8 @@ class Document(HTMLParser):
             node.end = node.start + len(self.get_starttag_text())
 
     def handle_endtag(self, tag):
+        if tag == 'body':
+            self.body_end = self.position()
         for index in range(len(self.stack) - 1, 0, -1):
             if self.stack[index].tag == tag:
                 for node in self.stack[index:]:
@@ -146,7 +149,9 @@ def clean_report(source):
     for start, end, replacement in sorted(repairs, reverse=True):
         source = source[:start] + replacement + source[end:]
     notice = '<p class="history-quality-note">新闻列表已按当前周边过滤规则整理；原 AI 分析与播客保留生成时版本。</p>'
-    source = source.replace('</body>', notice + '</body>', 1)
+    parsed = Document(source)
+    if parsed.body_end is not None:
+        source = source[:parsed.body_end] + notice + source[parsed.body_end:]
     return source, len(removed)
 
 
