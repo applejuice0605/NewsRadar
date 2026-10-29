@@ -233,6 +233,14 @@ class AIAnalyzer:
                 result.standalone_summaries = {}
 
             result = ground_analysis(result, self._evidence_sources)
+            if not self.include_rss:
+                result.rss_insights = ""
+                result.evidence_claims = [c for c in result.evidence_claims if c["section"] != "rss_insights"]
+                used = {i for c in result.evidence_claims for i in c["source_ids"]}
+                result.evidence_sources = {i: s for i, s in result.evidence_sources.items() if i in used}
+                if not result.evidence_claims:
+                    result.success = False
+                    result.error = "未返回启用板块的有效依据分析"
 
             # 填充统计数据
             result.total_news = total_news

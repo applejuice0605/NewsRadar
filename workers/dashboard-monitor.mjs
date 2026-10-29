@@ -29,7 +29,7 @@ async function asset(env, path, consume, headers = {}) {
   const timeout = setTimeout(() => controller.abort(), 15_000);
   try {
     const response = await env.ASSETS.fetch(new Request(ORIGIN + path, {
-      headers, signal: controller.signal, redirect: "error",
+      headers, signal: controller.signal, redirect: "manual",
     }));
     return await consume(response);
   } finally {
@@ -39,7 +39,7 @@ async function asset(env, path, consume, headers = {}) {
 
 async function readJSON(env, path) {
   return asset(env, path, async response => {
-    if (response.status !== 200) throw new Error("asset unavailable");
+    if (response.status !== 200) throw new Error("asset_status:" + response.status);
     const data = await response.json();
     if (!data || typeof data !== "object" || Array.isArray(data)) throw new Error("invalid metadata");
     return data;
@@ -48,6 +48,7 @@ async function readJSON(env, path) {
 
 export async function inspectHealth(env, now = Date.now()) {
   const issues = {};
+  const diagnostics = {};
   const details = [];
   const add = (key, status, text) => { issues[key] = status; details.push(text); };
   const local = shanghaiTime(now);
@@ -58,6 +59,7 @@ export async function inspectHealth(env, now = Date.now()) {
     readJSON(env, "/health.json"), readJSON(env, "/audio/latest.json"),
   ]);
   if (health.status === "rejected") {
+    diagnostics.collection = health.reason?.message?.startsWith("asset_status:") ? health.reason.message : "asset_read_failed";
     add("collection_metadata", "unknown", "采集：未知（健康元数据不可用）");
   } else {
     const collection = health.value.collection;
@@ -74,6 +76,7 @@ export async function inspectHealth(env, now = Date.now()) {
   }
   details.push(`音频要求日期：${requiredDay}（上海时间 22:00 起要求当天）`);
   if (audio.status === "rejected") {
+    diagnostics.audio = audio.reason?.message?.startsWith("asset_status:") ? audio.reason.message : "asset_read_failed";
     add("audio_metadata", "unknown", "音频：未知（元数据不可用）");
   } else {
     const metadata = audio.value;
@@ -120,7 +123,7 @@ export async function inspectHealth(env, now = Date.now()) {
     }
   }
   const status = Object.values(issues).reduce((result, item) => rank[item] > rank[result] ? item : result, "healthy");
-  return { status, issues, details, checked_at: now };
+  return { status, issues, details, checked_at: now, diagnostics };
 }
 
 export function buildCard(result, recovery = false) {
@@ -144,7 +147,7 @@ async function sendCard(env, result, recovery, now) {
   const timeout = setTimeout(() => controller.abort(), 15_000);
   try {
     const response = await fetch(env.HEALTH_WEBHOOK_URL, {
-      method: "POST", redirect: "error", signal: controller.signal,
+      method: "POST", redirect: "manual", signal: controller.signal,
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ timestamp: seconds, sign, msg_type: "interactive", card: buildCard(result, recovery) }),
     });

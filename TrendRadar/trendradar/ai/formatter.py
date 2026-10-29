@@ -17,20 +17,30 @@ def _escape_html(text: str) -> str:
 
 
 def _linked_evidence(text, result, html=False):
-    """Only turn server-validated IDs into links; all other HTML stays escaped."""
-    text = _escape_html(text) if html else text
-    for source_id, source in result.evidence_sources.items():
+    """Escape each untrusted text segment before inserting catalog-controlled links."""
+    def escape(value):
+        value = re.sub(r"https?://[^\s<>]+", "（非来源链接已省略）", value)
+        if html:
+            return _escape_html(value)
+        value = html_lib.escape(value, quote=False)
+        return re.sub(r"([\\`*_{}\[\]()#+.!|>~-])", r"\\\1", value)
+
+    parts = re.split(r'(\[N\d{3,}\])', text)
+    output = []
+    for part in parts:
+        source_id = part[1:-1] if re.fullmatch(r'\[N\d{3,}\]', part) else ''
+        source = result.evidence_sources.get(source_id, {})
         url = safe_source_url(source.get('url'))
         if not url:
-            continue
-        marker = '[' + source_id + ']'
-        if html:
-            replacement = ('<a class="ai-evidence-link" href="' + _escape_html(url)
-                           + '" target="_blank" rel="noopener noreferrer" title="'
-                           + _escape_html(source.get('title', '')) + '">依据 ' + source_id + '</a>')
+            output.append(escape(part))
+        elif html:
+            output.append('<a class="ai-evidence-link" href="' + _escape_html(url)
+                          + '" target="_blank" rel="noopener noreferrer" title="'
+                          + _escape_html(source.get('title', '')) + '">依据 ' + source_id + '</a>')
         else:
-            replacement = '[依据 ' + source_id + '](' + url.replace('(', '%28').replace(')', '%29') + ')'
-        text = text.replace(marker, replacement)
+            url = url.replace('(', '%28').replace(')', '%29').replace('<', '%3C').replace('>', '%3E')
+            output.append('[依据 ' + source_id + '](' + url + ')')
+    text = ''.join(output)
     return text.replace('\n', '<br>') if html else text
 
 
@@ -119,27 +129,28 @@ def _render_ai_analysis_markdown_like(
             return f"ℹ️ {result.error}"
         return f"⚠️ AI 分析失败: {result.error}"
 
+    content = lambda value: _linked_evidence(_format_list_content(value), result)
     lines = ["**✨ AI 热点分析**", ""]
 
     if result.core_trends:
-        lines.extend(["**核心热点态势**", _format_list_content(result.core_trends), ""])
+        lines.extend(["**核心热点态势**", content(result.core_trends), ""])
 
     if result.sentiment_controversy:
         lines.extend(
-            ["**证据与局限**", _format_list_content(result.sentiment_controversy), ""]
+            ["**证据与局限**", content(result.sentiment_controversy), ""]
         )
 
     if result.signals:
-        lines.extend(["**事件进展与待验证信号**", _format_list_content(result.signals), ""])
+        lines.extend(["**事件进展与待验证信号**", content(result.signals), ""])
 
     if result.rss_insights:
         lines.extend(
-            ["**RSS 深度洞察**", _format_list_content(result.rss_insights), ""]
+            ["**RSS 深度洞察**", content(result.rss_insights), ""]
         )
 
     if result.outlook_strategy:
         lines.extend(
-            ["**测试与工程行动建议**", _format_list_content(result.outlook_strategy), ""]
+            ["**测试与工程行动建议**", content(result.outlook_strategy), ""]
         )
 
     if result.standalone_summaries:
@@ -147,9 +158,9 @@ def _render_ai_analysis_markdown_like(
             result.standalone_summaries, *standalone_brackets
         )
         if summaries_text:
-            lines.extend(["**独立源点速览**", summaries_text])
+            lines.extend(["**独立源点速览**", content(summaries_text)])
 
-    return _linked_evidence("\n".join(lines), result)
+    return "\n".join(lines)
 
 
 def render_ai_analysis_markdown(result: AIAnalysisResult) -> str:

@@ -22,7 +22,7 @@ node --check workers/preview-auth.mjs
 git diff --check
 ```
 
-- Python：70 项通过，0 失败。原始日志 `.deploy/first-batch-python-tests.log`。
+- Python：74 项通过，0 失败。原始日志 `.deploy/first-batch-python-tests.log`。
 - Node：11 项通过，0 失败。原始日志 `.deploy/first-batch-node-tests.log`。
 - 40 条编辑种子样本：周边排除规则 40/40 通过，AI 准确率未测，不以规则通过率替代。
 - JS 语法与差异空白检查通过。
@@ -50,7 +50,12 @@ git diff --check
 
 - 正式采集器和正式网站未切换；现有新闻推送群保持原有配置。
 - 独立云端监测实现与离线自测完成，KV 已建立；Secret 同步被自动审批拒绝，Cron 留空，尚不能在 Mac 离线时实际告警。需要明确批准专用健康机器人凭据存入 Cloudflare 加密 Secret。
-- 内测部署与线上/页面复核结果待补充。
+- 已部署内测，正式站点首页 SHA-256 前后相同，所有内测功能开关保持开启。
+- 线上 `/analysis-preview.html`：HTTP 200，8 条依据链接；`/assets/report-speech.js`：三个时间标签齐全；`/status`：HTTP 200，无 ISO 时间戳直出。
+- 桌面及 390×844 小屏验证历史播客页面：播报日期、新闻更新、音频生成时间各自清楚，小屏文档宽度 390px，无横向溢出；历史 10 月 28 日播客显示云扬男声与上海生成时间，当天没有音频时不会冒用昨天音频。
+- 真实模型结果视觉证明：`analysis-evidence-desktop.png`；播放器证明：`podcast-dates-desktop.png`、`podcast-dates-mobile.png`。浏览器验收使用与部署相同的本地静态构建；线上另以已认证 HTTP 验证，未把密码写入页面或截图。
+- 独立复核补充 4 项回归：模型自由 Markdown 链接不能绕过来源目录；剔除不支持摘录的附带来源；畸形 section 单条拒绝不拖垮有效结果；RSS 禁用后不能被依据重建重新打开。
+- 云端实测发现本地 Node 不暴露的兼容问题：Workers 不支持 `redirect: "error"`，导致读取元数据之前即失败。已改为 `manual` 并由响应状态拒绝重定向，测试显式检查该选项。
 
 ## 回退
 

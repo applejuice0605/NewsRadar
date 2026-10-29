@@ -29,7 +29,7 @@ def ground_analysis(result, sources):
         section = claim.get('section')
         ids = claim.get('source_ids')
         fact = claim.get('fact')
-        if (section not in grouped or not isinstance(ids, list) or not ids
+        if (not isinstance(section, str) or section not in grouped or not isinstance(ids, list) or not ids
                 or not all(isinstance(i, str) and i in sources and sources[i]['url'] for i in ids)
                 or not isinstance(fact, str) or not fact.strip()):
             rejected += 1
@@ -37,7 +37,8 @@ def ground_analysis(result, sources):
         fact = fact.strip()
         ids = list(dict.fromkeys(ids))
         # A verbatim excerpt avoids accepting invented numbers as "facts".
-        if len(fact) < 6 or not any(fact in sources[i]['title'] or fact in sources[i].get('summary', '') for i in ids):
+        ids = [i for i in ids if fact in sources[i]['title'] or fact in sources[i].get('summary', '')]
+        if len(fact) < 6 or not ids:
             rejected += 1
             continue
         interpretation = claim.get('interpretation', '')

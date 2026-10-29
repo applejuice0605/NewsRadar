@@ -56,6 +56,38 @@ class EvidenceTests(unittest.TestCase):
         self.sources['N001']['url'] = ''
         self.assertFalse(self.result().success)
 
+    def test_untrusted_markdown_links_cannot_bypass_catalog(self):
+        result = self.result({**self.claim, 'interpretation': '查看[评测](https://phishing.invalid/key) <a href="https://phishing.invalid/key">点我</a>'})
+        rendered = render_ai_analysis_feishu(result)
+        self.assertNotIn('https://phishing.invalid', rendered)
+        self.assertIn('[依据 N001](https://example.test/v1)', rendered)
+        self.assertIn('**核心热点态势**', rendered)
+
+    def test_unrelated_source_removed_from_claim(self):
+        self.sources['N002'] = {'title': '天气预报明天多云', 'summary': '', 'url': 'https://weather.invalid/'}
+        result = self.result({**self.claim, 'source_ids': ['N001', 'N002']})
+        self.assertEqual(result.evidence_claims[0]['source_ids'], ['N001'])
+        self.assertNotIn('N002', result.evidence_sources)
+
+    def test_malformed_section_does_not_discard_other_valid_claims(self):
+        for section in ([], {}):
+            result = ground_analysis(AIAnalysisResult(success=True, evidence_claims=[
+                {**self.claim, 'section': section}, self.claim]), self.sources)
+            self.assertTrue(result.success)
+            self.assertEqual(result.evidence_rejected_count, 1)
+            self.assertEqual(len(result.evidence_claims), 1)
+
+    def test_disabled_rss_cannot_be_reintroduced_by_grounding(self):
+        with patch('trendradar.ai.analyzer.AIClient') as client:
+            client.return_value.validate_config.return_value = (True, '')
+            client.return_value.api_key = 'fixture-only'
+            client.return_value.chat.return_value = json.dumps({'evidence_claims': [{**self.claim, 'section': 'rss_insights'}]})
+            analyzer = AIAnalyzer({'MODEL': 'fixture/model'}, {'INCLUDE_RSS': False}, lambda: datetime.now(timezone.utc))
+            result = analyzer.analyze([{'word': '推理', 'titles': [dict(self.sources['N001'])]}])
+            self.assertEqual(result.rss_insights, '')
+            self.assertFalse(result.success)
+            self.assertEqual(result.evidence_sources, {})
+
     def test_legacy_parse_compatible_but_new_output_cannot_bypass_provenance(self):
         analyzer = object.__new__(AIAnalyzer)
         result = analyzer._parse_response('{"core_trends":"旧报告仍可读取"}')

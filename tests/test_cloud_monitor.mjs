@@ -20,7 +20,7 @@ let requests = [];
 let delivery = "success";
 globalThis.fetch = async (url, options) => {
   assert.equal(url, "https://bot.invalid/secret-token");
-  assert.equal(options.redirect, "error");
+  assert.equal(options.redirect, "manual");
   requests.push(JSON.parse(options.body));
   if (delivery === "throw") throw new Error("https://bot.invalid/secret-token test-secret");
   if (delivery === "http") return new Response("private", { status: 500 });
@@ -51,6 +51,7 @@ function fixture(at = now) {
       put: async (key, value) => storage.set(key, value),
     },
     ASSETS: { fetch: async request => {
+      assert.equal(request.redirect, "manual"); // Workers does not support redirect:error
       seen.push(request);
       const path = new URL(request.url).pathname;
       if (path === "/health.json") {
