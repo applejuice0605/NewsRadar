@@ -4,6 +4,8 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>TrendRadar 历史报告</title>
+  <link rel="icon" type="image/png" sizes="32x32" href="/assets/brand/favicon-32.png">
+  <link rel="apple-touch-icon" sizes="180x180" href="/assets/brand/apple-touch-icon.png">
   <style>
     :root {
       --ink: #1a1a1a;
@@ -59,10 +61,10 @@
       gap: 14px;
       align-items: start;
     }
-    h2 { margin: 0; font-size: 24px; }
+    h2 { margin: 0; font-size: 24px; display: flex; flex-wrap: wrap; align-items: center; gap: 8px; }
     .ai-badge {
       display: inline-block;
-      margin-left: 10px;
+      white-space: nowrap;
       padding: 4px 7px;
       background: var(--blue);
       color: white;
@@ -71,6 +73,7 @@
       font-size: 12px;
       vertical-align: middle;
     }
+    .podcast-badge { background: var(--yellow); color: var(--ink); }
     p { margin: 8px 0 0; color: #4a4a4a; }
     details { grid-column: 1 / -1; }
     summary { cursor: pointer; }
@@ -147,7 +150,7 @@
       input[type="date"] { width: 100%; }
     }
   </style>
-<link rel="icon" type="image/png" sizes="32x32" href="/assets/brand/favicon-32.png"><link rel="apple-touch-icon" sizes="180x180" href="/assets/brand/apple-touch-icon.png"><meta property="og:image" content="https://newsradar.ccwu.cc/assets/brand/newsradar-share-1200x630.png"><meta property="og:image:width" content="1200"><meta property="og:image:height" content="630"></head>
+<meta property="og:image" content="https://newsradar.ccwu.cc/assets/brand/newsradar-share-1200x630.png"><meta property="og:image:width" content="1200"><meta property="og:image:height" content="630"></head>
 <body>
   <main class="shell">
     <header>
@@ -179,12 +182,13 @@
     <div id="archiveList"><section class="archive-card" data-date="2026-10-31">
                 <div>
                     <h2>2026-10-31</h2>
-                    <p>15 份报告</p>
+                    <p>16 份报告</p>
                 </div>
-                <a class="primary-link" href="/reports/2026-10-31/15-12.html">查看 当天汇总</a>
+                <a class="primary-link" href="/reports/2026-10-31/16-13.html">查看 当天汇总</a>
                 <details>
                     <summary>展开当天所有快照</summary>
-                    <ul><li><a href="/reports/2026-10-31/15-12.html">15-12</a></li>
+                    <ul><li><a href="/reports/2026-10-31/16-13.html">16-13</a></li>
+<li><a href="/reports/2026-10-31/15-12.html">15-12</a></li>
 <li><a href="/reports/2026-10-31/14-11.html">14-11</a></li>
 <li><a href="/reports/2026-10-31/13-09.html">13-09</a></li>
 <li><a href="/reports/2026-10-31/12-08.html">12-08</a></li>
@@ -194,8 +198,7 @@
 <li><a href="/reports/2026-10-31/08-03.html">08-03</a></li>
 <li><a href="/reports/2026-10-31/07-02.html">07-02</a></li>
 <li><a href="/reports/2026-10-31/06-01.html">06-01</a></li>
-<li><a href="/reports/2026-10-31/05-00.html">05-00</a></li>
-<li><a href="/reports/2026-10-31/03-59.html">03-59</a></li></ul>
+<li><a href="/reports/2026-10-31/05-00.html">05-00</a></li></ul>
                 </details>
             </section>
 <section class="archive-card" data-date="2026-10-30">
@@ -222,7 +225,7 @@
             </section>
 <section class="archive-card" data-date="2026-10-29">
                 <div>
-                    <h2>2026-10-29<span class="ai-badge">AI 分析</span></h2>
+                    <h2>2026-10-29<span class="ai-badge">AI 分析</span><span class="ai-badge podcast-badge">AI 播客</span></h2>
                     <p>25 份报告</p>
                 </div>
                 <a class="primary-link" href="/reports/2026-10-29/20-19.html">查看 AI 汇总</a>
@@ -244,7 +247,7 @@
             </section>
 <section class="archive-card" data-date="2026-10-28">
                 <div>
-                    <h2>2026-10-28<span class="ai-badge">AI 分析</span></h2>
+                    <h2>2026-10-28<span class="ai-badge">AI 分析</span><span class="ai-badge podcast-badge">AI 播客</span></h2>
                     <p>25 份报告</p>
                 </div>
                 <a class="primary-link" href="/reports/2026-10-28/20-48.html">查看 AI 汇总</a>
@@ -266,7 +269,7 @@
             </section>
 <section class="archive-card" data-date="2026-10-27">
                 <div>
-                    <h2>2026-10-27<span class="ai-badge">AI 分析</span></h2>
+                    <h2>2026-10-27<span class="ai-badge">AI 分析</span><span class="ai-badge podcast-badge">AI 播客</span></h2>
                     <p>23 份报告</p>
                 </div>
                 <a class="primary-link" href="/reports/2026-10-27/20-17.html">查看 AI 汇总</a>
@@ -288,7 +291,7 @@
             </section>
 <section class="archive-card" data-date="2026-10-26">
                 <div>
-                    <h2>2026-10-26<span class="ai-badge">AI 分析</span></h2>
+                    <h2>2026-10-26<span class="ai-badge">AI 分析</span><span class="ai-badge podcast-badge">AI 播客</span></h2>
                     <p>24 份报告</p>
                 </div>
                 <a class="primary-link" href="/reports/2026-10-26/20-49.html">查看 AI 汇总</a>
@@ -310,7 +313,7 @@
             </section>
 <section class="archive-card" data-date="2026-10-25">
                 <div>
-                    <h2>2026-10-25<span class="ai-badge">AI 分析</span></h2>
+                    <h2>2026-10-25<span class="ai-badge">AI 分析</span><span class="ai-badge podcast-badge">AI 播客</span></h2>
                     <p>23 份报告</p>
                 </div>
                 <a class="primary-link" href="/reports/2026-10-25/20-21.html">查看 AI 汇总</a>
@@ -332,7 +335,7 @@
             </section>
 <section class="archive-card" data-date="2026-10-24">
                 <div>
-                    <h2>2026-10-24<span class="ai-badge">AI 分析</span></h2>
+                    <h2>2026-10-24<span class="ai-badge">AI 分析</span><span class="ai-badge podcast-badge">AI 播客</span></h2>
                     <p>24 份报告</p>
                 </div>
                 <a class="primary-link" href="/reports/2026-10-24/20-54.html">查看 AI 汇总</a>
@@ -354,7 +357,7 @@
             </section>
 <section class="archive-card" data-date="2026-10-23">
                 <div>
-                    <h2>2026-10-23<span class="ai-badge">AI 分析</span></h2>
+                    <h2>2026-10-23<span class="ai-badge">AI 分析</span><span class="ai-badge podcast-badge">AI 播客</span></h2>
                     <p>24 份报告</p>
                 </div>
                 <a class="primary-link" href="/reports/2026-10-23/20-25.html">查看 AI 汇总</a>
@@ -376,7 +379,7 @@
             </section>
 <section class="archive-card" data-date="2026-10-22">
                 <div>
-                    <h2>2026-10-22<span class="ai-badge">AI 分析</span></h2>
+                    <h2>2026-10-22<span class="ai-badge">AI 分析</span><span class="ai-badge podcast-badge">AI 播客</span></h2>
                     <p>23 份报告</p>
                 </div>
                 <a class="primary-link" href="/reports/2026-10-22/20-55.html">查看 AI 汇总</a>
@@ -398,7 +401,7 @@
             </section>
 <section class="archive-card" data-date="2026-10-21">
                 <div>
-                    <h2>2026-10-21<span class="ai-badge">AI 分析</span></h2>
+                    <h2>2026-10-21<span class="ai-badge">AI 分析</span><span class="ai-badge podcast-badge">AI 播客</span></h2>
                     <p>23 份报告</p>
                 </div>
                 <a class="primary-link" href="/reports/2026-10-21/20-23.html">查看 AI 汇总</a>
@@ -420,7 +423,7 @@
             </section>
 <section class="archive-card" data-date="2026-10-20">
                 <div>
-                    <h2>2026-10-20<span class="ai-badge">AI 分析</span></h2>
+                    <h2>2026-10-20<span class="ai-badge">AI 分析</span><span class="ai-badge podcast-badge">AI 播客</span></h2>
                     <p>24 份报告</p>
                 </div>
                 <a class="primary-link" href="/reports/2026-10-20/20-50.html">查看 AI 汇总</a>
@@ -442,7 +445,7 @@
             </section>
 <section class="archive-card" data-date="2026-10-19">
                 <div>
-                    <h2>2026-10-19<span class="ai-badge">AI 分析</span></h2>
+                    <h2>2026-10-19<span class="ai-badge">AI 分析</span><span class="ai-badge podcast-badge">AI 播客</span></h2>
                     <p>23 份报告</p>
                 </div>
                 <a class="primary-link" href="/reports/2026-10-19/20-19.html">查看 AI 汇总</a>
@@ -464,7 +467,7 @@
             </section>
 <section class="archive-card" data-date="2026-10-18">
                 <div>
-                    <h2>2026-10-18<span class="ai-badge">AI 分析</span></h2>
+                    <h2>2026-10-18<span class="ai-badge">AI 分析</span><span class="ai-badge podcast-badge">AI 播客</span></h2>
                     <p>24 份报告</p>
                 </div>
                 <a class="primary-link" href="/reports/2026-10-18/20-49.html">查看 AI 汇总</a>
@@ -486,7 +489,7 @@
             </section>
 <section class="archive-card" data-date="2026-10-17">
                 <div>
-                    <h2>2026-10-17<span class="ai-badge">AI 分析</span></h2>
+                    <h2>2026-10-17<span class="ai-badge">AI 分析</span><span class="ai-badge podcast-badge">AI 播客</span></h2>
                     <p>23 份报告</p>
                 </div>
                 <a class="primary-link" href="/reports/2026-10-17/20-21.html">查看 AI 汇总</a>
@@ -508,7 +511,7 @@
             </section>
 <section class="archive-card" data-date="2026-10-16">
                 <div>
-                    <h2>2026-10-16<span class="ai-badge">AI 分析</span></h2>
+                    <h2>2026-10-16<span class="ai-badge">AI 分析</span><span class="ai-badge podcast-badge">AI 播客</span></h2>
                     <p>24 份报告</p>
                 </div>
                 <a class="primary-link" href="/reports/2026-10-16/20-54.html">查看 AI 汇总</a>
@@ -530,7 +533,7 @@
             </section>
 <section class="archive-card" data-date="2026-10-15">
                 <div>
-                    <h2>2026-10-15<span class="ai-badge">AI 分析</span></h2>
+                    <h2>2026-10-15<span class="ai-badge">AI 分析</span><span class="ai-badge podcast-badge">AI 播客</span></h2>
                     <p>24 份报告</p>
                 </div>
                 <a class="primary-link" href="/reports/2026-10-15/20-40.html">查看 AI 汇总</a>
