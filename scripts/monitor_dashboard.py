@@ -18,6 +18,17 @@ from zoneinfo import ZoneInfo
 REPO = Path(__file__).resolve().parents[1]
 DATA = Path(os.environ.get('NEWSRADAR_PRODUCTION_DIR', '/Users/bruce/Coding/NewsRadar-production'))
 HEALTH_CONFIG = REPO / '.health.env.local'
+DAILY_HEALTH_DEADLINE = (23, 15)
+
+
+def daily_health_deadline_passed(now):
+    """Return whether Shanghai time has reached the final daily deadline."""
+    return (now.hour, now.minute) >= DAILY_HEALTH_DEADLINE
+
+
+def expected_podcast_date(now):
+    """The current day's audio is required only after the 23:15 deadline."""
+    return now.date().isoformat() if daily_health_deadline_passed(now) else (now.date().fromordinal(now.date().toordinal() - 1)).isoformat()
 
 
 def display_china_time(value):
@@ -50,6 +61,18 @@ def build_health_card(state, runtime, now):
                and notification.get('status') not in ('failed', 'disabled', 'unknown')
                and collection.get('success') is True)
     labels = {'success': '成功', 'failed': '失败', 'skipped': '本轮无需推送', 'disabled': '已禁用', 'unknown': '未知'}
+    stage_labels = {
+        'preflight': '运行环境预检',
+        'writer': '模型写稿',
+        'script_validation': '稿件校验',
+        'synthesis': '语音合成',
+        'publication': '站点发布',
+        'remote_verification': '远端验证',
+    }
+    podcast_stage = stage_labels.get(podcast.get('failure_stage'))
+    podcast_status = labels.get(podcast.get('status'), '未知')
+    if podcast_stage and podcast.get('status') != 'success':
+        podcast_status += '（阶段：' + podcast_stage + '）'
 
     def group(title, content):
         color = {'新闻看板与采集': 'blue', 'AI 播客': 'turquoise', '飞书新闻推送': 'orange'}[title]
@@ -74,11 +97,13 @@ def build_health_card(state, runtime, now):
                   '内测部署：' + ('成功' if state.get('deploy_success') else '失败') +
                   '\n线上数据：' + ('正常' if state.get('website_fresh') else '异常/过期') +
                   '\n距上次采集完成：' + (str(int(float(state['website_age_minutes']) + 0.5)) + ' 分钟' if state.get('website_age_minutes') is not None else '未知') +
-                  '\n上次采集完成：' + display_china_time(collection.get('last_completed_at')) +
+                  '\n上次采集完成：' + display_china_time(state.get('website_completed_at', collection.get('last_completed_at'))) +
                   '\n间隔后补跑：' + ('是' if collection.get('catch_up') else '否')),
-            group('AI 播客', '生成状态：' + labels.get(podcast.get('status'), '未知') +
+            group('AI 播客', '生成状态：' + podcast_status +
+                  ('\n节目版本：简报版已发布' if podcast.get('edition_variant') == 'bulletin' and podcast.get('status') == 'success' else '') +
                   '\n最新一期：' + str(podcast.get('date', '未知')) +
                   '\n线上音频：' + ('可访问' if podcast.get('online_verified') else '验证失败') +
+                  (('\n阻断阶段：' + podcast_stage + ('（原稿已保存）' if podcast.get('failure_stage') == 'script_validation' else '')) if podcast_stage and podcast.get('status') != 'success' else '') +
                   ('\n内测试听日期：' + str(podcast.get('online_date', '未知')) if podcast.get('preview_only') else '')),
             group('飞书新闻推送', '状态：' + labels.get(notification.get('status'), '未知') +
                   '\n上次推送成功：' + display_china_time(notification.get('last_success_at'))),
@@ -144,6 +169,7 @@ def env_file(path):
 def main():
     parser = argparse.ArgumentParser()
     parser.add_argument('--notify', action='store_true')
+    parser.add_argument('--no-notify', action='store_true', help='verify without sending a health message')
     args = parser.parse_args()
     now = datetime.now(ZoneInfo('Asia/Shanghai'))
     state_path = REPO / '.deploy/dashboard-health.json'
@@ -159,6 +185,7 @@ def main():
             health = json.load(response)
         completed = health.get('collection', {}).get('last_completed_at')
         age = (now - datetime.fromisoformat(completed)).total_seconds() / 60 if completed else None
+        state['website_completed_at'] = completed
         state['website_age_minutes'] = round(age, 1) if age is not None else None
         state['website_fresh'] = age is not None and age < 120
     except Exception as error:
@@ -166,9 +193,19 @@ def main():
         state['error_type'] = type(error).__name__
         health = {}
     podcast = read_json(DATA / 'TrendRadar/output/audio/latest.json')
-    expected_date = now.date().isoformat() if now.hour >= 22 else (now.date().fromordinal(now.date().toordinal() - 1)).isoformat()
+    expected_date = expected_podcast_date(now)
     audio = DATA / ('TrendRadar/output' + str(podcast.get('audio_url', '')))
     state['podcast'] = {'date': podcast.get('date'), 'generated_at': podcast.get('generated_at'), 'voice': podcast.get('voice'), 'status': 'success' if podcast.get('date', '') >= expected_date and audio.is_file() and audio.stat().st_size > 1000 else 'failed'}
+    state['podcast']['edition_variant'] = podcast.get('edition_variant', 'dialogue')
+    generation = read_json(DATA / 'TrendRadar/output/audio/.daily-worker-state.json')
+    generation_date = generation.get('date')
+    relevant_generation = generation_date in {expected_date, podcast.get('date')}
+    if relevant_generation and state['podcast']['status'] != 'success':
+        failure = generation.get('last_failure') or {}
+        publication = generation.get('publication') if isinstance(generation.get('publication'), dict) else {}
+        state['podcast']['failure_stage'] = (failure.get('stage')
+            or publication.get('failure_stage')
+            or generation.get('blocked_reason'))
     try:
         with fetch_private('https://preview.newsradar.ccwu.cc/audio/latest.json', token) as response:
             remote_podcast = json.load(response)
@@ -187,19 +224,26 @@ def main():
         state['podcast']['online_verified'] = False
     if not state['podcast']['online_verified']:
         state['podcast']['status'] = 'failed'
+        if not state['podcast'].get('failure_stage'):
+            failure = generation.get('last_failure') or {}
+            publication = generation.get('publication') if isinstance(generation.get('publication'), dict) else {}
+            state['podcast']['failure_stage'] = (failure.get('stage')
+                or publication.get('failure_stage')
+                or 'remote_verification')
     state_path.parent.mkdir(parents=True, exist_ok=True)
     state_path.write_text(json.dumps(state, ensure_ascii=False, indent=2))
-    if args.notify or (now.hour >= 22 and state.get('last_daily_sent') != now.date().isoformat()):
+    if not args.no_notify and (args.notify or (daily_health_deadline_passed(now) and state.get('last_daily_sent') != now.date().isoformat())):
         runtime = read_json(DATA / 'TrendRadar/output/meta/runtime_health.json')
         card = build_health_card(state, runtime, now)
         key = 'nr-health-' + (now.strftime('%Y%m%d-%H%M%S') if args.notify else now.strftime('%Y%m%d'))
         receipt = send_health_card(card, key)
         state['health_channel'] = 'dedicated_signed_webhook'
         state['health_message_id'] = receipt.get('message_id')
-        state['last_daily_sent'] = now.date().isoformat() if now.hour >= 22 else None
+        state['last_daily_sent'] = now.date().isoformat() if daily_health_deadline_passed(now) else None
         state_path.write_text(json.dumps(state, ensure_ascii=False, indent=2))
         print('[health] Feishu daily report delivered')
-    if not state['deploy_success'] or not state['website_fresh']:
+    if (not state['deploy_success'] or not state['website_fresh']
+            or state.get('podcast', {}).get('status') != 'success'):
         return 1
     return 0
 

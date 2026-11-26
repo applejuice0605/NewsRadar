@@ -99,8 +99,8 @@ test("collection boundaries, missing/invalid/future timestamps and success are n
   }
 });
 
-test("audio date rolls at 22 Shanghai and across month/year boundaries", async () => {
-  for (const instant of ["2026-10-29T13:59:59Z", "2026-01-01T00:00:00Z"]) {
+test("audio date rolls at23:15 Shanghai and across month/year boundaries", async () => {
+  for (const instant of ["2026-10-29T15:14:59Z", "2026-01-01T00:00:00Z"]) {
     const at = Date.parse(instant);
     const f = fixture(at);
     const yesterday = shanghaiTime(at - 86_400_000).slice(0, 10);
@@ -108,10 +108,11 @@ test("audio date rolls at 22 Shanghai and across month/year boundaries", async (
     f.data.audio.audio_url = `/audio/${yesterday}/daily.mp3`;
     assert.equal((await inspectHealth(f.env, at)).status, "healthy");
   }
-  const f = fixture();
+  const due = Date.parse("2026-10-29T15:15:00Z");
+  const f = fixture(due);
   f.data.audio.date = "2026-10-28";
   f.data.audio.audio_url = "/audio/2026-10-28/daily.mp3";
-  assert.equal((await inspectHealth(f.env, now)).issues.audio_stale, "unhealthy");
+  assert.equal((await inspectHealth(f.env, due)).issues.audio_stale, "unhealthy");
 });
 
 test("invalid, future and missing audio metadata, unsafe/mismatched paths", async () => {
@@ -245,4 +246,35 @@ test('authenticated cloud activation sends one real-path card; repeated activati
   }
   assert.equal(requests[0].card.header.template, 'green');
   assert.match(requests[0].card.header.title.content, /正常/);
+});
+
+test('missing daily audio reports saved-script validation stage', async () => {
+  const at = Date.parse('2026-11-06T15:30:42Z');
+  const f = fixture(at);
+  f.data.audio.date = '2026-11-05';
+  f.data.health.podcast = {generation: {date: '2026-11-06', stage: 'script_validation', retryable: false}};
+  const result = await inspectHealth(f.env, at);
+  assert.equal(result.status, 'unhealthy');
+  assert.match(result.details.join('\n'), /播客阻断阶段：稿件校验/);
+  f.data.health.podcast.generation.date = '2026-11-05';
+  const old = await inspectHealth(f.env, at);
+  assert.doesNotMatch(old.details.join('\n'), /播客阻断阶段/);
+});
+
+test('fresh collector checkpoint supersedes stale deployed asset, but expires on stop', async () => {
+  const { env, data, storage } = fixture();
+  data.health.collection.last_completed_at = new Date(now - 122 * 60_000).toISOString();
+  storage.set("collection-health:v1", { success: true, last_completed_at: new Date(now - 60 * 60_000).toISOString() });
+  const fresh = await inspectHealth(env, now);
+  assert.equal(fresh.status, "healthy");
+  assert.equal(fresh.diagnostics.collection_source, "checkpoint");
+  const stopped = await inspectHealth(env, now + 61 * 60_000);
+  assert.equal(stopped.issues.collection_stale, "unhealthy");
+
+  storage.set("collection-health:v1", { success: false, last_completed_at: new Date(now).toISOString() });
+  assert.equal((await inspectHealth(env, now)).issues.collection_failed, "unhealthy");
+
+  data.health.collection.last_completed_at = new Date(now).toISOString();
+  storage.set("collection-health:v1", { success: false, last_completed_at: new Date(now - 60_000).toISOString() });
+  assert.equal((await inspectHealth(env, now)).status, "healthy");
 });

@@ -212,6 +212,7 @@ def build_public_health(raw: dict[str, Any] | None, now: datetime | None = None)
         "collection": {
             "last_started_at": _iso_time(_first(collection_raw, "last_started_at", "started_at")),
             "last_completed_at": last_completed,
+            "running": _boolean(collection_raw.get("running")),
             "duration_seconds": _number(_first(collection_raw, "duration_seconds", "duration")),
             "success": success,
             "source_success": _number(_first(collection_raw, "source_success", "sources_succeeded"), integer=True),

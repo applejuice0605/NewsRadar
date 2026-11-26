@@ -4,6 +4,7 @@
 from __future__ import annotations
 
 import argparse
+import fcntl
 import json
 import os
 import re
@@ -152,7 +153,8 @@ def start_event(state: dict[str, Any]) -> None:
         {
             "last_started_at": iso_time(now),
             "running": True,
-            "success": None,
+            # success describes the last COMPLETED run. Do not erase it
+            # while the next run is in flight and preview snapshots it.
             "gap_minutes": gap_minutes,
             "catch_up": bool(gap_minutes and gap_minutes > SLEEP_GAP_MINUTES),
         }
@@ -231,15 +233,20 @@ def main() -> int:
     publish.add_argument("--success", action=argparse.BooleanOptionalAction, required=True)
     args = parser.parse_args()
 
-    state = load_state()
-    state.setdefault("schema_version", 1)
-    if args.event == "start":
-        start_event(state)
-    elif args.event == "finish":
-        finish_event(state, args.exit_code, args.run_log)
-    else:
-        publish_event(state, args.success)
-    write_state(state)
+    # Atomic rename protects readers; a lock also protects concurrent writers
+    # (collector start/finish and publication) from losing each other's fields.
+    STATE_FILE.parent.mkdir(parents=True, exist_ok=True)
+    with STATE_FILE.with_suffix('.lock').open('a') as lock:
+        fcntl.flock(lock, fcntl.LOCK_EX)
+        state = load_state()
+        state.setdefault("schema_version", 1)
+        if args.event == "start":
+            start_event(state)
+        elif args.event == "finish":
+            finish_event(state, args.exit_code, args.run_log)
+        else:
+            publish_event(state, args.success)
+        write_state(state)
     return 0
 
 

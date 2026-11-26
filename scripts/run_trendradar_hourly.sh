@@ -38,6 +38,10 @@ python3 "$REPO_DIR/scripts/update_runtime_health.py" finish \
   --exit-code "$RUN_STATUS" \
   --run-log "$RUN_LOG"
 
+if ! "$REPO_DIR/scripts/publish_collection_health.sh" "$REPO_DIR"; then
+  echo "[health] collection checkpoint upload failed; preview asset remains fallback"
+fi
+
 if [ "$RUN_STATUS" -ne 0 ]; then
   echo "[$(date '+%Y-%m-%d %H:%M:%S')] TrendRadar run failed with status $RUN_STATUS"
   exit "$RUN_STATUS"

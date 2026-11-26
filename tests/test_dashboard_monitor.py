@@ -15,6 +15,13 @@ SPEC.loader.exec_module(MODULE)
 
 
 class DashboardMonitorTests(unittest.TestCase):
+    def test_daily_audio_deadline_is_2315_shanghai(self):
+        self.assertFalse(MODULE.daily_health_deadline_passed(datetime(2026, 10, 30, 23, 14)))
+        self.assertTrue(MODULE.daily_health_deadline_passed(datetime(2026, 10, 30, 23, 15)))
+        self.assertEqual(MODULE.expected_podcast_date(datetime(2026, 10, 30, 23, 14)), '2026-10-29')
+        self.assertEqual(MODULE.expected_podcast_date(datetime(2026, 10, 30, 23, 15)), '2026-10-30')
+        self.assertEqual(MODULE.expected_podcast_date(datetime(2026, 10, 31, 0, 0)), '2026-10-30')
+
     def test_times_are_converted_to_beijing_and_elapsed_minutes_are_clear(self):
         self.assertEqual(MODULE.display_china_time('2026-10-23T09:21:40Z'), '2026-10-23 17:21:40')
         self.assertEqual(MODULE.display_china_time('2026-10-23T17:21:40+08:00'), '2026-10-23 17:21:40')
@@ -29,6 +36,21 @@ class DashboardMonitorTests(unittest.TestCase):
             path = Path(directory) / 'env'
             path.write_text('# ignored\nexport FEISHU_WEBHOOK_URL="https://example.test/a?x=1"\nPREVIEW_PASSWORD=\'literal$word\'\n')
             self.assertEqual(MODULE.env_file(path), {'FEISHU_WEBHOOK_URL': 'https://example.test/a?x=1', 'PREVIEW_PASSWORD': 'literal$word'})
+
+    def test_card_displays_current_script_validation_failure(self):
+        state={'website_fresh':True,'deploy_success':True,
+            'podcast':{'status':'failed','failure_stage':'script_validation','date':'2026-11-05','online_verified':True}}
+        card=MODULE.build_health_card(state,{},datetime(2026,11,6,23,30))
+        self.assertIn('阻断阶段：稿件校验',json.dumps(card,ensure_ascii=False))
+        self.assertEqual(card['header']['template'],'red')
+
+    def test_card_displays_remote_verification_when_remote_is_stale(self):
+        state = {'website_fresh': True, 'deploy_success': True,
+                 'podcast': {'status': 'failed', 'failure_stage': 'remote_verification',
+                             'date': '2026-11-15', 'online_verified': False}}
+        rendered = json.dumps(MODULE.build_health_card(state, {}, datetime(2026, 11, 15, 23, 30)), ensure_ascii=False)
+        self.assertIn('阶段：远端验证', rendered)
+        self.assertIn('阻断阶段：远端验证', rendered)
 
     def test_missing_health_is_unknown(self):
         self.assertEqual(MODULE.read_json(Path('/nonexistent/newsradar-health')), {})

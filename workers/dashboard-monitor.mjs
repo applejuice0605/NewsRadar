@@ -1,13 +1,26 @@
 // Independent of the publishing machine: inspect the deployed asset binding only.
 const ORIGIN = "https://preview.newsradar.ccwu.cc";
+export const COLLECTION_KEY = "collection-health:v1";
 export const STATE_KEY = "dashboard-monitor:v1";
 const MINUTE = 60_000;
 const REPEAT_MS = 6 * 60 * MINUTE;
+const DAILY_HEALTH_DEADLINE_MINUTES = 23 * 60 + 15;
 const rank = { healthy: 0, unknown: 1, unhealthy: 2 };
 
 function validDay(value) {
   return typeof value === "string" && /^\d{4}-\d{2}-\d{2}$/.test(value) &&
     Number.isFinite(Date.parse(value)) && new Date(value).toISOString().slice(0, 10) === value;
+}
+
+function shanghaiMinutes(local) {
+  return Number(local.slice(11, 13)) * 60 + Number(local.slice(14, 16));
+}
+
+export function expectedPodcastDay(now) {
+  const local = shanghaiTime(now);
+  const today = local.slice(0, 10);
+  return shanghaiMinutes(local) >= DAILY_HEALTH_DEADLINE_MINUTES
+    ? today : shanghaiTime(now - 24 * 60 * MINUTE).slice(0, 10);
 }
 
 function timestamp(value) {
@@ -53,16 +66,29 @@ export async function inspectHealth(env, now = Date.now()) {
   const add = (key, status, text) => { issues[key] = status; details.push(text); };
   const local = shanghaiTime(now);
   const today = local.slice(0, 10);
-  const requiredDay = Number(local.slice(11, 13)) >= 22 ? today
-    : shanghaiTime(now - 24 * 60 * MINUTE).slice(0, 10);
-  const [health, audio] = await Promise.allSettled([
+  const requiredDay = expectedPodcastDay(now);
+  const [health, audio, checkpoint] = await Promise.allSettled([
     readJSON(env, "/health.json"), readJSON(env, "/audio/latest.json"),
+    Promise.resolve().then(() => env.HEALTH_MONITOR_STATE?.get(COLLECTION_KEY, "json")),
   ]);
-  if (health.status === "rejected") {
+  const assetCollection = health.status === "fulfilled" ? health.value.collection : null;
+  const direct = checkpoint.status === "fulfilled" ? checkpoint.value : null;
+  const directTime = timestamp(direct?.last_completed_at);
+  const assetTime = timestamp(assetCollection?.last_completed_at);
+  const useDirect = typeof direct?.success === "boolean" && directTime !== null &&
+    directTime <= now + 5 * MINUTE &&
+    (assetTime === null || assetTime > now + 5 * MINUTE || directTime >= assetTime);
+  diagnostics.collection_source = useDirect ? "checkpoint" : "asset";
+
+  if (health.status === "rejected" && !useDirect) {
     diagnostics.collection = health.reason?.message?.startsWith("asset_status:") ? health.reason.message : "asset_read_failed";
     add("collection_metadata", "unknown", "采集：未知（健康元数据不可用）");
   } else {
-    const collection = health.value.collection;
+    const generation = health.value?.podcast?.generation;
+    if (generation?.date === requiredDay && generation?.stage === "script_validation") {
+      details.push("播客阻断阶段：稿件校验；原稿已保存，重复运行不会自动修复");
+    }
+    const collection = useDirect ? direct : assetCollection;
     const completed = timestamp(collection?.last_completed_at);
     if (completed === null || completed - now > 5 * MINUTE) {
       add("collection_time", "unknown", "采集：未知（完成时间缺失、无效或超前超过 5 分钟）");
@@ -74,7 +100,7 @@ export async function inspectHealth(env, now = Date.now()) {
     if (collection?.success === false) add("collection_failed", "unhealthy", "采集：异常（最近一次采集失败）");
     else if (collection?.success !== true) add("collection_result", "unknown", "采集：未知（缺少有效成功标记）");
   }
-  details.push(`音频要求日期：${requiredDay}（上海时间 22:00 起要求当天）`);
+  details.push(`音频要求日期：${requiredDay}（上海时间 23:15 起要求当天）`);
   if (audio.status === "rejected") {
     diagnostics.audio = audio.reason?.message?.startsWith("asset_status:") ? audio.reason.message : "asset_read_failed";
     add("audio_metadata", "unknown", "音频：未知（元数据不可用）");
@@ -84,6 +110,7 @@ export async function inspectHealth(env, now = Date.now()) {
       add("audio_date", "unknown", "音频：未知（日期无效或在未来）");
     } else {
       details.push(`音频日期：${metadata.date}`);
+      if (metadata.edition_variant === "bulletin") details.push("节目版本：简报版");
       if (metadata.date < requiredDay) add("audio_stale", "unhealthy", "音频：异常（未达到要求日期）");
     }
     const generated = timestamp(metadata.generated_at);
