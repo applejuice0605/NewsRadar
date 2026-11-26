@@ -83,6 +83,7 @@
     var restored = false;
     var lastSave = -Infinity;
     var progressDirty = false;
+    var pendingPositionSync = false;
     var rateDirty = false;
     var localRate = data.rate;
     // Programmatic restoration is a baseline, not a local listening/seek edit.
@@ -111,9 +112,26 @@
     note.className = 'podcast-resume-note';
     note.textContent = '进度仅保存在本设备浏览器；切换页面会停止播放，返回后点击继续收听。';
     function updateResume() {
-      resume.hidden = !(position > 0) || completed;
-      resume.textContent = '继续收听 · ' + timeLabel(position);
-      resume.setAttribute('aria-label', '从 ' + timeLabel(position) + ' 继续收听');
+      var current = restored && Number.isFinite(audio.currentTime) ? audio.currentTime : position;
+      if (pendingPositionSync && !progressDirty) current = position;
+      var labelText;
+      var ariaLabel;
+      resume.hidden = false;
+      if (!audio.paused && !audio.ended) {
+        labelText = '暂停播放';
+        ariaLabel = '暂停播放';
+      } else if (audio.ended || completed) {
+        labelText = '重新播放';
+        ariaLabel = '重新播放';
+      } else if (current > 0) {
+        labelText = '继续播放 · ' + timeLabel(current);
+        ariaLabel = '从 ' + timeLabel(current) + ' 继续播放';
+      } else {
+        labelText = '开始播放';
+        ariaLabel = '开始播放';
+      }
+      resume.textContent = labelText;
+      resume.setAttribute('aria-label', ariaLabel);
     }
     updateResume();
     controls.append(label, resume);
@@ -125,19 +143,25 @@
       position = clampSeek(audio, position);
       if (position > 0) audio.currentTime = position;
       observedTime = audio.currentTime;
+      pendingPositionSync = false;
       updateResume();
     }
     function capturePositionChange() {
       if (!restored || !Number.isFinite(audio.currentTime)) return;
       if (audio.currentTime !== observedTime) {
         progressDirty = true;
+        pendingPositionSync = false;
         observedTime = audio.currentTime;
+        if (!completed) position = clampSeek(audio, audio.currentTime);
       }
+      updateResume();
     }
     function syncInactive(latest) {
       if (!audio.paused || progressDirty) return;
       var entry = latest.entries.find(function (item) { return item.key === key; });
-      position = entry && !entry.completed ? entry.position : 0;
+      var nextPosition = entry && !entry.completed ? entry.position : 0;
+      pendingPositionSync = restored && nextPosition !== audio.currentTime;
+      position = nextPosition;
       completed = Boolean(entry && entry.completed);
       // Keep this as a pending resume target; do not seek or play on a storage event.
       if (!rateDirty) {
@@ -182,27 +206,57 @@
       audio.playbackRate = rate;
       save(true);
     }
+    function requestPlay() {
+      var result;
+      try { result = audio.play(); } catch (_) { updateResume(); return; }
+      if (result && typeof result.catch === 'function') {
+        result.catch(function () {
+          // A rejected play() must leave the control reflecting the actual
+          // paused state, even in browsers/test doubles that emit play first.
+          if (!audio.paused && typeof audio.pause === 'function') audio.pause();
+          updateResume();
+        });
+      }
+    }
+    function resetForReplay() {
+      completed = false;
+      position = 0;
+      progressDirty = true;
+      if (Number.isFinite(audio.duration) && audio.duration > 0) audio.currentTime = 0;
+      observedTime = audio.currentTime;
+      updateResume();
+    }
+    function toggleResume() {
+      if (!audio.paused && !audio.ended) {
+        audio.pause();
+        return;
+      }
+      restore();
+      if (pendingPositionSync && !progressDirty && restored) {
+        audio.currentTime = clampSeek(audio, position);
+        observedTime = audio.currentTime;
+        pendingPositionSync = false;
+      }
+      if (audio.ended || completed) resetForReplay();
+      requestPlay();
+    }
     audio.addEventListener('loadedmetadata', restore);
     select.addEventListener('change', function () { changeRate(Number(select.value)); });
     audio.addEventListener('ratechange', function () { changeRate(audio.playbackRate); });
     resume.addEventListener('click', function () {
-      function playSaved() {
-        restore();
-        if (restored) audio.currentTime = clampSeek(audio, position);
-        audio.play().catch(function () {});
-      }
-      if (audio.readyState >= 1) playSaved();
+      if (audio.readyState >= 1) toggleResume();
       else {
-        audio.addEventListener('loadedmetadata', playSaved, { once: true });
+        audio.addEventListener('loadedmetadata', toggleResume, { once: true });
         audio.load();
       }
     });
-    audio.addEventListener('play', function () { completed = false; });
+    audio.addEventListener('play', function () { completed = false; updateResume(); });
     audio.addEventListener('timeupdate', function () { save(false); });
     audio.addEventListener('seeked', function () {
       capturePositionChange();
       if (progressDirty) completed = false;
       save(true);
+      updateResume();
     });
     audio.addEventListener('pause', function () { save(true); });
     audio.addEventListener('ended', function () { completed = true; position = 0; progressDirty = true; save(true); });
@@ -250,11 +304,18 @@
       var meta = document.createElement('span');
       meta.className = 'podcast-meta';
       meta.textContent = '播报日期：' + metadata.date + ' · ' +
+        (metadata.edition_variant === 'bulletin' ? '简报版 · ' : '') +
         (metadata.voice_label || VOICE_LABELS[metadata.voice] || '自然中文语音');
       var generated = document.createElement('span');
       generated.className = 'podcast-generated';
       generated.textContent = '音频生成：' + chinaTime(metadata.generated_at) + '（北京时间）';
       meta.appendChild(generated);
+      if (metadata.news_cutoff_at) {
+        var cutoff = document.createElement('span');
+        cutoff.className = 'podcast-generated';
+        cutoff.textContent = '新闻截止：' + chinaTime(metadata.news_cutoff_at) + '（北京时间，与晚间分析共用事实版本）';
+        meta.appendChild(cutoff);
+      }
       if (metadata.source_reason || metadata.source_kind === 'legacy_unverified') {
         var grounding = document.createElement('span');
         grounding.className = 'podcast-generated';

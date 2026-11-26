@@ -302,6 +302,8 @@ def _load_ai_analysis_config(config_data: Dict) -> Dict:
             "MAX_ARTICLES": ai_config.get("primary_materials", {}).get("max_articles", 5),
             "BUDGET_SECONDS": ai_config.get("primary_materials", {}).get("budget_seconds", 20),
         },
+        "SHARED_DAILY_EDITION": ai_config.get("shared_daily_edition", False),
+        "SHARED_MATERIALS": config_data.get("podcast", {}).get("materials", {}),
         "ENABLED": enabled_env if enabled_env is not None else ai_config.get("enabled", False),
         "LANGUAGE": ai_config.get("language", "Chinese"),
         "PROMPT_FILE": ai_config.get("prompt_file", "ai_analysis_prompt.txt"),

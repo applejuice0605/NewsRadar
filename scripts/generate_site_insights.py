@@ -26,6 +26,7 @@ _quality_spec = importlib.util.spec_from_file_location("news_quality", REPO_DIR 
 _quality_module = importlib.util.module_from_spec(_quality_spec)
 _quality_spec.loader.exec_module(_quality_module)
 peripheral_reason = _quality_module.peripheral_reason
+title_evidence_eligible = _quality_module.title_evidence_eligible
 DEFAULT_SITE_DIR = REPO_DIR / "docs"
 RANGES = (1, 7, 30, 90)
 TOP_ARTICLES_LIMIT = 8
@@ -425,6 +426,8 @@ def _load_news_database(path: Path, day: date) -> list[dict[str, Any]]:
                 {
                     "key": f"{day.isoformat()}:news:{item_id}",
                     "date": day,
+                    "source_type": "hotlist",
+                    "item_id": item_id,
                     "title": str(row[1]),
                     "source_id": str(row[2]),
                     "source": str(row[3] or row[2]),
@@ -472,6 +475,8 @@ def _load_rss_database(path: Path, day: date) -> list[dict[str, Any]]:
             {
                 "key": f"{day.isoformat()}:rss:{int(row[0])}",
                 "date": day,
+                "source_type": "rss",
+                "item_id": int(row[0]),
                 "title": str(row[1]),
                 "source_id": f"rss:{row[2]}",
                 "source": str(row[3] or row[2]),
@@ -489,6 +494,102 @@ def _load_rss_database(path: Path, day: date) -> list[dict[str, Any]]:
         ]
 
 
+def _assessment_key(source_type: Any, item_id: Any) -> tuple[str, str] | None:
+    if not isinstance(source_type, str) or not source_type.strip() or item_id is None:
+        return None
+    return source_type.strip().lower(), str(item_id)
+
+
+def _assessment_completed(value: Any) -> bool:
+    return isinstance(value, dict) and value.get("completed") is True and value.get("decision") in {"accept", "reject", "rejected"}
+
+
+def _load_filter_assessments(output_dir: Path, day: date) -> dict[tuple[str, str], dict[str, Any]]:
+    """Read one day's append-only quality sidecar, preferring latest completed rows.
+
+    A later request failure is deliberately not allowed to erase a completed
+    decision. Runs are append ordered, so the last completed row wins.
+    """
+    path = output_dir / "meta" / "filter_quality" / f"{day.isoformat()}.json"
+    document = _load_json(path)
+    if not document or document.get("date") not in {None, day.isoformat()}:
+        return {}
+    selected: dict[tuple[str, str], dict[str, Any]] = {}
+    runs = document.get("runs")
+    if not isinstance(runs, list):
+        return selected
+    for run in runs:
+        if not isinstance(run, dict) or not isinstance(run.get("assessments"), list):
+            continue
+        for assessment in run["assessments"]:
+            if not isinstance(assessment, dict):
+                continue
+            key = _assessment_key(assessment.get("source_type"), assessment.get("id"))
+            if key is None:
+                continue
+            # Unknown/incomplete rows are useful only when no completed row exists.
+            if _assessment_completed(assessment):
+                selected[key] = dict(assessment)
+            elif key not in selected or not _assessment_completed(selected.get(key)):
+                selected[key] = dict(assessment)
+    # A malformed sidecar row must not leak an old completed value into a new
+    # key. Normalize only the fields the public consumers rely on.
+    return selected
+
+
+def _legacy_assessment(tags: list[tuple[str, float]] | None = None) -> dict[str, Any]:
+    relevance = max((float(score) for _tag, score in (tags or [])), default=None)
+    return {
+        "policy_version": "legacy_unknown",
+        "status": "legacy_unknown",
+        "completed": False,
+        "decision": None,
+        "topic_relevance": relevance,
+        "information_value": None,
+        "evidence_quote": "",
+        "reason": "legacy_unknown: value and evidence unavailable",
+        "reason_code": "legacy_unknown",
+    }
+
+
+def _mismatched_assessment(tags: list[tuple[str, float]] | None = None) -> dict[str, Any]:
+    assessment = _legacy_assessment(tags)
+    assessment.update({
+        "status": "assessment_title_mismatch",
+        "reason": "assessment_title_mismatch: sidecar title does not match database article",
+        "reason_code": "assessment_title_mismatch",
+    })
+    return assessment
+
+
+def _attach_filter_assessments(output_dir: Path, articles: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    by_day: dict[date, dict[tuple[str, str], dict[str, Any]]] = {}
+    for article in articles:
+        day = article.get("date")
+        if not isinstance(day, date):
+            continue
+        if day not in by_day:
+            by_day[day] = _load_filter_assessments(output_dir, day)
+        key = _assessment_key(article.get("source_type"), article.get("item_id"))
+        assessment = by_day[day].get(key) if key else None
+        if assessment is None and article.get("source_type") == "hotlist":
+            assessment = by_day[day].get(_assessment_key("news", article.get("item_id")))
+        if assessment is not None and assessment.get("title") != article.get("title"):
+            assessment = _mismatched_assessment(article.get("tags"))
+        article["assessment"] = dict(assessment) if assessment else _legacy_assessment(article.get("tags"))
+        article["assessment"]["title"] = article.get("title", "")
+        article["assessment"]["source_type"] = article.get("source_type")
+        article["assessment"]["id"] = article.get("item_id")
+        current = article["assessment"]
+        if current.get("completed") is True and current.get("decision") in {"reject", "rejected"}:
+            article["tags"] = []
+        elif title_evidence_eligible(article.get("title", ""), current) and isinstance(current.get("tag"), str) and current["tag"].strip():
+            # RSS classifications live with the daily filter store, not
+            # necessarily in each RSS DB. The evidenced current tag wins.
+            article["tags"] = [(current["tag"], current["topic_relevance"])]
+    return articles
+
+
 def load_articles(output_dir: Path) -> tuple[list[dict[str, Any]], list[str]]:
     """Load databases independently; one corrupt database never stops the build."""
     articles: list[dict[str, Any]] = []
@@ -503,7 +604,7 @@ def load_articles(output_dir: Path) -> tuple[list[dict[str, Any]], list[str]]:
                 articles.extend(loader(path, day))
             except (OSError, sqlite3.Error, ValueError, TypeError) as exc:
                 skipped.append(f"{path.name}: {type(exc).__name__}")
-    return articles, skipped
+    return _attach_filter_assessments(output_dir, articles), skipped
 
 
 def _article_summary(article: dict[str, Any], relevance: float | None) -> dict[str, Any]:
@@ -889,13 +990,20 @@ def generate_site_insights(repo_dir: Path, site_dir: Path, now: datetime | None 
     runtime = _load_json(output_dir / "meta" / "runtime_health.json") or {}
     podcast = _load_json(output_dir / "audio" / "latest.json") or {}
     expected = (now or _utc_now()).astimezone(ZoneInfo("Asia/Shanghai"))
-    expected_day = expected.date() if expected.hour >= 22 else expected.date() - timedelta(days=1)
+    expected_day = (expected.date() if (expected.hour, expected.minute) >= (23, 15)
+                    else expected.date() - timedelta(days=1))
     audio_file = output_dir / str(podcast.get("audio_url", "")).lstrip("/")
     runtime["podcast"] = {
         "date": podcast.get("date"), "generated_at": podcast.get("generated_at"),
         "voice": podcast.get("voice_label", podcast.get("voice")),
         "status": "success" if podcast.get("date", "") >= expected_day.isoformat() and audio_file.is_file() and audio_file.stat().st_size > 1000 else "failed",
     }
+    generation = _load_json(output_dir / 'audio' / '.daily-worker-state.json') or {}
+    failure = generation.get('last_failure') or {}
+    if generation.get('date') == expected_day.isoformat() and runtime['podcast']['status'] != 'success':
+        runtime['podcast']['generation'] = {'date': generation['date'],
+            'stage': failure.get('stage', generation.get('blocked_reason', 'unknown')),
+            'retryable': failure.get('retryable'), 'code': failure.get('code')}
     health = build_public_health(runtime, now=now)
     collection_dedup = _load_json(output_dir / 'meta/collection_dedup.json') or {}
     deliveries = (_load_json(output_dir / 'meta/delivery_dedup.json') or {}).get('accounts', {})

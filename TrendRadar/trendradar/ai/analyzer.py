@@ -105,6 +105,7 @@ class AIAnalyzer:
         self.primary_config = analysis_config.get("PRIMARY_MATERIALS", {})
 
         # 加载提示词模板
+        self.analysis_config = dict(analysis_config)
         self.system_prompt, self.user_prompt_template = load_prompt_template(
             analysis_config.get("PROMPT_FILE", "ai_analysis_prompt.txt"),
             label="AI",
@@ -158,9 +159,18 @@ class AIAnalyzer:
                 error="未配置 AI API Key，请在 config.yaml 或环境变量 AI_API_KEY 中设置"
             )
 
+        # Daily analysis and podcast consume one immutable22:00 fact edition.
+        self._shared_edition = None
+        if report_mode == "daily" and self.analysis_config.get("SHARED_DAILY_EDITION", False):
+            from trendradar.ai.daily_edition import freeze
+            try:
+                self._shared_edition = freeze(Path(__file__).resolve().parents[3],
+                    self.get_time_func(), settings=self.analysis_config.get("SHARED_MATERIALS"))
+            except Exception as exc:
+                return AIAnalysisResult(success=False, error=f"共享晚间事实快照不可用: {exc}")
         # 准备新闻内容并获取统计数据
         self._evidence_sources = {}
-        if self.primary_config.get('ENABLED'):
+        if self.primary_config.get('ENABLED') and not self._shared_edition:
             stats = [{**group, 'titles': [dict(t) if isinstance(t, dict) else t for t in group.get('titles', [])]} for group in stats]
             candidates = [t for group in stats for t in group['titles'] if isinstance(t, dict) and t.get('url')][:5]
             try:
@@ -172,7 +182,11 @@ class AIAnalyzer:
             except Exception:
                 # Secondary materials must never suppress the original report.
                 print('[AI] 原站材料补充不可用，继续仅依据标题/摘要分析')
-        prepared = self._prepare_news_content(stats, rss_stats)
+        if self._shared_edition:
+            from trendradar.ai.daily_edition import analysis_input
+            prepared = analysis_input(self, self._shared_edition, PreparedNewsContent)
+        else:
+            prepared = self._prepare_news_content(stats, rss_stats)
         total_news = prepared.hotlist_total + prepared.rss_total
 
         if not prepared.news_content and not prepared.rss_content:
@@ -194,6 +208,11 @@ class AIAnalyzer:
         if not keywords:
             keywords = [s.get("word", "") for s in stats if s.get("word")] if stats else []
 
+        if self._shared_edition:
+            keywords = sorted({t.get('category','') for t in self._shared_edition['writer_plan']['topics']})
+            platforms = sorted({t['source'] for t in self._shared_edition['writer_plan']['topics']})
+            current_time = self._shared_edition['news_cutoff_at']
+
         # 使用安全的字符串替换，避免模板中其他花括号（如 JSON 示例）被误解析
         user_prompt = self.user_prompt_template
         user_prompt = user_prompt.replace("{report_mode}", report_mode)
@@ -210,9 +229,12 @@ class AIAnalyzer:
         # 构建独立展示区内容
         standalone_content = ""
         standalone_count = 0
-        if self.include_standalone and standalone_data:
+        if self.include_standalone and standalone_data and not self._shared_edition:
             standalone_content, standalone_count = self._prepare_standalone_content(standalone_data)
         user_prompt = user_prompt.replace("{standalone_content}", standalone_content)
+
+        if self._shared_edition:
+            user_prompt += "\n本期是22:00截止的最终晚间分析，仅依据上述共享事实摘录；保留预测、范围、时态和来源限定，不能引用实时榜单或另外补充新闻。"
 
         if self.debug:
             print("\n" + "=" * 80)
@@ -231,7 +253,7 @@ class AIAnalyzer:
             result = self._parse_response(response)
 
             # JSON 解析失败时的重试兜底（仅重试一次）
-            if result.error and "JSON 解析错误" in result.error:
+            if result.error and "JSON 解析错误" in result.error and not self._shared_edition:
                 print(f"[AI] JSON 解析失败，尝试让 AI 修复...")
                 retry_result = self._retry_fix_json(response, result.error)
                 if retry_result and retry_result.success and not retry_result.error:
@@ -263,6 +285,12 @@ class AIAnalyzer:
                 day = self.get_time_func().date().isoformat()
                 articles = [{'id': sid, **record, 'date': day} for sid, record in self._evidence_sources.items()]
                 result.fact_pack = make_fact_pack(articles, day, result.evidence_claims, result.evidence_sources)
+                if self._shared_edition:
+                    from trendradar.ai.daily_edition import write_json
+                    shared = {k:self._shared_edition[k] for k in ('edition_id','news_cutoff_at','frozen_at','facts_sha256')}
+                    result.fact_pack['shared_edition'] = shared
+                    write_json(Path(self._shared_edition['edition_path']).parent/'analysis-result.json',
+                        {'success':True,'shared_edition':shared,'fact_pack':result.fact_pack})
 
             # 填充统计数据
             result.total_news = total_news
@@ -439,6 +467,11 @@ class AIAnalyzer:
             messages.append({"role": "system", "content": self.system_prompt})
         messages.append({"role": "user", "content": user_prompt})
 
+        if getattr(self, '_shared_edition', None):
+            from trendradar.ai.daily_edition import analysis_once
+            # A separate instance disables configured fallbacks as well as retries.
+            config={**self.ai_config,'FALLBACK_MODELS':[],'NUM_RETRIES':0}
+            return analysis_once(self._shared_edition,messages,AIClient(config))
         return self.client.chat(messages)
 
     def _retry_fix_json(self, original_response: str, error_msg: str) -> Optional[AIAnalysisResult]:

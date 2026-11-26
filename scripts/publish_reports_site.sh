@@ -5,8 +5,29 @@ SCRIPT_DIR="${0:A:h}"
 REPO_DIR="${REPO_DIR:-${SCRIPT_DIR:h}}"
 PROJECT_DIR="$REPO_DIR/TrendRadar"
 SITE_DIR="$REPO_DIR/docs"
+export PATH="$PROJECT_DIR/.venv/bin:$PATH"
+PYTHONPATH="$PROJECT_DIR${PYTHONPATH:+:$PYTHONPATH}" "$PROJECT_DIR/.venv/bin/python" -c "import pytz; from trendradar.ai.daily_edition import load_edition"
+# The descriptor lock is released by the OS, including after a crash.
+if [ "${NEWSRADAR_SITE_PUBLISH_LOCK_HELD:-0}" != "1" ]; then
+  exec python3 - "$0" "$REPO_DIR" <<'PYLOCK'
+import fcntl, os, sys
+from pathlib import Path
+repo = Path(sys.argv[2]).resolve()
+lock_path = repo / 'TrendRadar/output/logs/.site-publish.lock'
+lock_path.parent.mkdir(parents=True, exist_ok=True)
+lock = lock_path.open('a')
+try:
+    fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
+except BlockingIOError:
+    print('[site] another publication is active; retry on the next worker run')
+    sys.exit(75)
+os.set_inheritable(lock.fileno(), True)
+script = str(Path(sys.argv[1]).resolve())
+os.execve(script, [script], {**os.environ, 'NEWSRADAR_SITE_PUBLISH_LOCK_HELD': '1'})
+PYLOCK
+fi
 DOMAIN="${NEWSRADAR_SITE_DOMAIN:-newsradar.ccwu.cc}"
-GIT_PUSH="${NEWSRADAR_SITE_GIT_PUSH:-1}"
+GIT_PUSH="${NEWSRADAR_SITE_GIT_PUSH:-0}"
 SITE_ENV="${NEWSRADAR_SITE_ENV:-production}"
 APPLY_FEATURES="${NEWSRADAR_SITE_APPLY_FEATURES:-1}"
 
@@ -25,8 +46,9 @@ cp "$INDEX_FILE" "$SITE_DIR/index.html"
 rsync -a --exclude='*/notification_test_*.html' "$HTML_DIR/" "$SITE_DIR/reports/"
 if [ -d "$AUDIO_DIR" ]; then
   mkdir -p "$SITE_DIR/audio"
-  rsync -a --delete "$AUDIO_DIR/" "$SITE_DIR/audio/"
+  rsync -a --delete --exclude='.*' --exclude='drafts/' "$AUDIO_DIR/" "$SITE_DIR/audio/"
 fi
+python3 "$REPO_DIR/scripts/publish_daily_editions.py" --repo "$REPO_DIR" --site "$SITE_DIR"
 printf "%s\n" "$DOMAIN" > "$SITE_DIR/CNAME"
 touch "$SITE_DIR/.nojekyll"
 if [ -f "$REPO_DIR/scripts/filter_report_history.py" ]; then

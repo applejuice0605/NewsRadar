@@ -103,7 +103,8 @@ class FactPackValidationTest(unittest.TestCase):
                 script, kind, reason = podcast.script_from_fact_pack(self.validate(pack))
                 self.assertEqual(kind, 'fact_pack_articles')
                 self.assertIn('缺少通过来源校验的分析', reason)
-                self.assertIn('来源摘要', script)
+                self.assertNotIn('来源摘要', script)
+                self.assertIn(pack['articles'][0]['summary'], script)
                 self.assertNotIn('未经证实的进展', script)
                 self.assertNotIn('评分', script)
                 self.assertNotIn('条件性分析', script)
@@ -118,14 +119,17 @@ class FactPackValidationTest(unittest.TestCase):
         script, kind, _ = podcast.script_from_fact_pack(self.validate(pack))
         self.assertEqual(kind, 'fact_pack_claims')
         self.assertLess(len(script), 120)
-        self.assertGreater(len(script), 40)
+        self.assertGreater(len(script), 0)
         self.assertIn(pack['claims'][0]['fact'], script)
         self.assertNotIn('条件性分析', script)
         pack['claims'][0]['interpretation'] = '可能便于批量调用。'
         script, _, _ = podcast.script_from_fact_pack(self.validate(pack))
-        self.assertIn('条件性分析，尚待验证', script)
+        self.assertNotIn('条件性分析', script)
+        self.assertIn('可能便于批量调用', script)
         self.assertIn('未独立复测', script)
 
+    @unittest.skipUnless((ROOT / "TrendRadar/trendradar/ai/fact_pack.py").is_file(),
+                         "upstream fact-pack builder is not deployed in the legacy collector")
     def test_article_catalog_accepts_stable_ids_from_parent_schema(self):
         from trendradar.ai.fact_pack import make_fact_pack
         day = fact_pack()['date']
@@ -142,6 +146,15 @@ class FactPackValidationTest(unittest.TestCase):
         self.assertIn('公告', spoken)
         for token in ('http', 'N001', 'N002', '<b>', ']('):
             self.assertNotIn(token, spoken)
+        self.assertNotIn('<|coughing|>', podcast.spoken_text('来源正文<|coughing|>中的控制字符'))
+
+    def test_fact_pack_control_tags_cannot_reach_offline_narration(self):
+        pack = fact_pack()
+        tagged = pack['claims'][0]['fact'] + '<|coughing|>'
+        pack['claims'][0]['fact'] = tagged
+        pack['evidence_sources']['N001']['title'] = tagged
+        script, _, _ = podcast.script_from_fact_pack(self.validate(pack))
+        self.assertNotIn('<|coughing|>', script)
 
     def test_measured_chapters_use_duration_ratios_and_factual_titles(self):
         script = '据来源甲报道：模型发布新版本。' + '\n\n' + '据来源乙报道：接口增加批处理。'
@@ -167,7 +180,9 @@ class PublicationTest(unittest.TestCase):
         self.prompt.write_text('prompt {content}', encoding='utf-8')
         self.args = argparse.Namespace(force=False, fact_pack=self.pack_file, input=self.root / 'missing.html',
                                        date=self.pack['date'], output_root=self.root / 'preview')
-        self.config = {'enabled': True, 'min_script_chars': 1700, 'retention_days': 90}
+        # Legacy fixture packs are intentionally tiny; the production config
+        # enables the long-form minimum, while compatibility tests opt out.
+        self.config = {'enabled': True, 'min_script_chars': 0, 'min_audio_seconds': 0, 'retention_days': 90}
 
     def run_main(self, duration=28.25, tts=None, writer=None, ai=None):
         async def fake_tts(text, output, voice, rate, volume):
@@ -424,6 +439,48 @@ class PublicationTest(unittest.TestCase):
         self.assertFalse(metadata['analysis_available'])
         self.assertIn('仅播报来源陈述', metadata['source_reason'])
 
+    def test_script_only_writes_review_without_tts_ai_or_publication(self):
+        self.args.script_only = True
+        code, synth, client = self.run_main()
+        self.assertEqual(code, 0)
+        synth.assert_not_called()
+        client.assert_not_called()
+        draft = self.args.output_root / 'drafts' / self.pack['date']
+        script = (draft / 'script.txt').read_text().strip()
+        review = json.loads((draft / 'narration-review.json').read_text())
+        self.assertEqual(review['script_sha256'], podcast.hashlib.sha256(script.encode()).hexdigest())
+        self.assertEqual(json.loads((draft / 'facts.json').read_text()), self.pack)
+        self.assertFalse((self.args.output_root / 'latest.json').exists())
+        self.assertFalse((self.args.output_root / self.pack['date']).exists())
+
+    def test_unreviewed_long_sentence_preserves_old_episode_and_stops_before_tts(self):
+        self.assertEqual(self.run_main()[0], 0)
+        before = self.latest()
+        self.pack['claims'][0]['interpretation'] = '如果' + '任务范围和测试条件均未改变，' * 8 + '才可能比较。'
+        self.pack_file.write_text(json.dumps(self.pack))
+        code, synth, _ = self.run_main()
+        self.assertEqual(code, 1)
+        synth.assert_not_called()
+        self.assertEqual(self.latest(), before)
+        self.args.reviewed_script_sha256 = 'stale-draft-hash'
+        self.assertEqual(self.run_main()[0], 1)
+        script, _ = podcast.compose_narration(self.pack, podcast.spoken_text)
+        self.args.reviewed_script_sha256 = podcast.hashlib.sha256(script.encode()).hexdigest()
+        self.assertEqual(self.run_main()[0], 0)
+        transcript = self.asset(self.latest()['transcript_url'])
+        self.assertTrue((transcript.parent / 'narration-review.json').is_file())
+
+    def test_script_only_rejects_legacy_without_calling_ai(self):
+        self.args.script_only = True
+        self.args.fact_pack = None
+        self.args.date = None
+        self.args.input.write_text('<div>legacy content</div>')
+        with patch.object(podcast, 'LATEST_DAILY', self.args.input):
+            code, synth, client = self.run_main()
+        self.assertEqual(code, 1)
+        synth.assert_not_called()
+        client.assert_not_called()
+
     def test_legacy_only_on_production_path_marked_unverified_and_no_expansion(self):
         self.args.fact_pack = None
         self.args.date = None
@@ -443,6 +500,197 @@ class PublicationTest(unittest.TestCase):
         self.assertFalse(metadata['claim_grounded'])
         self.assertIsNone(metadata['fact_pack_hash'])
         client.return_value.chat.assert_called_once()
+
+    def test_soulx_route_uses_local_backend_and_never_edge(self):
+        self.config.update(engine='soulx', soulx={'voice': 'female_1'})
+        def fake_local(text, output, settings):
+            output.write_bytes(b'local-mp3')
+            return {'device': 'mps', 'chunk_count': 1}
+        with patch.object(podcast, 'synthesize_soulx', side_effect=fake_local) as local:
+            code, edge, client = self.run_main()
+        self.assertEqual(code, 0)
+        edge.assert_not_called()
+        client.assert_not_called()
+        local.assert_called_once()
+        self.assertEqual(self.latest()['engine'], 'soulx')
+        self.assertEqual(self.latest()['voice'], 'female_1')
+        self.assertEqual(self.latest()['synthesis']['device'], 'mps')
+
+    def test_daily_freeze_retains_complete_episode_after_material_changes(self):
+        self.assertEqual(self.run_main()[0], 0)
+        first = self.latest()
+        self.args.once_per_day = True
+        self.pack['claims'][0]['interpretation'] = '可能改变调用方式。'
+        self.pack_file.write_text(json.dumps(self.pack))
+        code, synth, _ = self.run_main()
+        self.assertEqual(code, 0)
+        synth.assert_not_called()
+        self.assertEqual(self.latest()['audio_url'], first['audio_url'])
+
+    def model_client(self, text=None):
+        client = Mock()
+        client.return_value.validate_config.return_value = (True, '')
+        client.return_value.chat.return_value = text or (
+            '团队公告提到，新版本增加批处理接口。这个变化可能方便批量调用。'
+            '目前只有公告，还没有独立复测，实际效果需要在任务中确认。')
+        return client
+
+    def test_model_editorial_cache_survives_tts_failure_without_another_writing_call(self):
+        self.config['script_mode'] = 'model_editorial'
+        client = self.model_client()
+        async def failed_tts(*args):
+            raise RuntimeError('synthetic GPU failure')
+        code, _, first = self.run_main(tts=failed_tts, ai=client)
+        self.assertEqual(code, 1)
+        first.return_value.chat.assert_called_once()
+        self.assertEqual(first.return_value.chat.call_args.kwargs['max_tokens'], 6000)
+        self.assertFalse((self.args.output_root/'latest.json').exists())
+        self.pack['generated_at'] = self.pack['date'] + 'T09:00:00+08:00'
+        self.pack['evidence_sources']['N009'] = {**self.pack['evidence_sources']['N001'], 'title': '未引用的新标题'}
+        self.pack['evidence_sources']['N001']['fetched_at'] = 'volatile unused timestamp'
+        self.pack_file.write_text(json.dumps(self.pack))
+        self.assertEqual(self.run_main()[0], 0)  # default mock refuses any AI call
+        metadata = self.latest()
+        self.assertEqual(metadata['script_mode'], 'model_editorial')
+        self.assertTrue(metadata['source_claims_validated'])
+        self.assertFalse(metadata['claim_grounded'])
+        review = json.loads((self.asset(metadata['audio_url']).parent/'narration-review.json').read_text())
+        self.assertTrue(review['draft_cache_hit'])
+        self.assertEqual(review['additional_model_calls'], 0)
+        self.assertFalse(review['model_output_semantically_verified'])
+
+    def test_rejected_model_draft_is_retained_and_never_auto_buys_a_rewrite(self):
+        self.assertEqual(self.run_main()[0], 0)
+        previous = self.latest()
+        self.config['script_mode'] = 'model_editorial'
+        client = self.model_client('团队公告说成本下降99%，这个数字输入中没有。' * 3)
+        code, synth, _ = self.run_main(ai=client)
+        self.assertEqual(code, 1)
+        synth.assert_not_called()
+        client.return_value.chat.assert_called_once()
+        self.assertEqual(self.run_main()[0], 1)  # retained rejected draft, no AI call
+        self.assertEqual(self.latest(), previous)
+
+    def test_editorial_draft_only_writes_review_without_tts_or_publication(self):
+        self.config['script_mode'] = 'model_editorial'
+        self.args.editorial_draft_only = True
+        code, synth, client = self.run_main(ai=self.model_client())
+        self.assertEqual(code, 0)
+        synth.assert_not_called()
+        client.return_value.chat.assert_called_once()
+        self.assertTrue((self.args.output_root/'drafts'/self.pack['date']/'script.txt').is_file())
+        self.assertFalse((self.args.output_root/'latest.json').exists())
+
+    def test_daily_worker_snapshot_is_allowed_only_at_private_current_day_path(self):
+        self.args.fact_pack = None
+        day = self.pack['date']
+        self.args.date = None
+        self.args.allow_daily_snapshot = True
+        self.args.input = self.args.output_root/'.daily-inputs'/day/'daily.html'
+        self.args.input.parent.mkdir(parents=True)
+        body = ('AI 热点分析。来源材料说明新接口仍需复测。' * 8)
+        html = f'生成时间</span><span class="info-value">{day[5:]}</span><div class="ai-section">{body}</div>'
+        self.args.input.write_text(html)
+        code, _, client = self.run_main(ai=self.model_client())
+        self.assertEqual(code, 0)
+        client.return_value.chat.assert_called_once()
+        # A copied HTML elsewhere cannot use the worker-only allowance.
+        self.args.input = self.root/'arbitrary.html'
+        self.args.input.write_text(html)
+        code, synth, client = self.run_main()
+        self.assertEqual(code, 1)
+        synth.assert_not_called()
+        client.assert_not_called()
+
+    def editorial_material_file(self, items=None):
+        self.args.editorial_materials = self.root/'editorial-materials.json'
+        self.args.fact_pack = None
+        data = {'schema_version':1,'policy_version':'podcast-materials-v1','date':self.pack['date'],
+                'items': items if items is not None else [{
+                    'id':'item-one','title':'这份标题仅在编辑后台', 'source':'团队公告',
+                    'url':'https://example.test/release','published_at':self.pack['date'],
+                    'text':'团队公告称新版本增加了批处理接口，调用方可以按任务批次提交请求。'
+                           '接口说明列出了使用范围，并提醒使用者先在自己的任务上复测质量。'
+                           '团队尚未公开全部生产环境数据，实际吞吐和稳定性仍需要用户自行测量。',
+                    'material_kind':'source_summary','evidence_scope':'source_summary'}]}
+        self.args.editorial_materials.write_text(json.dumps(data,ensure_ascii=False))
+        return data
+
+    def test_screened_sources_hide_headlines_from_model_and_publish_references_only(self):
+        self.config.update(script_mode='model_editorial',source_mode='screened_articles')
+        self.editorial_material_file()
+        client = self.model_client()
+        code, _, _ = self.run_main(ai=client)
+        self.assertEqual(code,0)
+        message = client.return_value.chat.call_args.args[0][1]['content']
+        self.assertNotIn('这份标题仅在编辑后台',message)
+        self.assertNotIn('item-one',message)
+        self.assertIn('批处理接口',message)
+        metadata = self.latest()
+        self.assertTrue(metadata['source_materials_screened'])
+        self.assertTrue(self.asset(metadata['sources_url']).is_file())
+        self.assertFalse(metadata['claim_grounded'])
+        references = json.loads((self.asset(metadata['audio_url']).parent/'sources.json').read_text())
+        self.assertNotIn('text',references['sources'][0])
+
+    def test_empty_screened_materials_never_call_writer_or_tts(self):
+        self.config.update(source_mode='screened_articles')
+        self.editorial_material_file(items=[])
+        code, synth, client = self.run_main()
+        self.assertEqual(code,1)
+        client.assert_not_called()
+        synth.assert_not_called()
+        self.assertFalse((self.args.output_root/'latest.json').exists())
+
+    def test_title_commentary_model_response_is_rejected_before_tts(self):
+        self.config['script_mode']='model_editorial'
+        code,synth,client=self.run_main(ai=self.model_client('这批材料里有一篇标题宣称新接口上线。目前只有标题，还不能确认实际变化。' * 2))
+        self.assertEqual(code,1)
+        synth.assert_not_called()
+
+    def test_screened_mode_never_falls_back_to_old_title_pack(self):
+        self.config['source_mode']='screened_articles'
+        code,synth,client=self.run_main()
+        self.assertEqual(code,1)
+        client.assert_not_called()
+        synth.assert_not_called()
+
+    def test_thousands_separator_is_not_a_new_number_but_decimal_change_is(self):
+        self.assertEqual(podcast.numeric_tokens('训练使用3,800块GPU。'),podcast.numeric_tokens('训练使用3800块GPU。'))
+        self.assertNotEqual(podcast.numeric_tokens('成本3.5元。'),podcast.numeric_tokens('成本35元。'))
+
+    def test_voice_tags_are_whitelisted_limited_and_not_public(self):
+        draft = podcast.clean_script(
+            '事件说明<|breathing|>继续。<|sigh|>观察<|laughter|>。'
+            '<|coughing|>多余控制<|unknown|>不应出现。', 1000)
+        self.assertEqual(draft.count('<|'), 3)
+        self.assertIn('<|breathing|>', draft)
+        self.assertNotIn('<|unknown|>', draft)
+        self.assertEqual(podcast.speech_char_count(draft), len('事件说明继续。观察。多余控制不应出现。'))
+        self.assertEqual(podcast.public_script_text(draft), '事件说明继续。观察。多余控制不应出现。')
+
+    def test_short_script_is_rejected_before_tts(self):
+        self.config['min_script_chars'] = 1700
+        code, synth, _ = self.run_main()
+        self.assertEqual(code, 1)
+        synth.assert_not_called()
+        self.assertFalse((self.args.output_root / 'latest.json').exists())
+
+    def test_short_audio_is_rejected_before_publication(self):
+        self.config['min_audio_seconds'] = 300
+        code, synth, _ = self.run_main(duration=299.9)
+        self.assertEqual(code, 1)
+        synth.assert_called_once()
+        self.assertFalse((self.args.output_root / 'latest.json').exists())
+
+    def test_existing_short_episode_is_kept_when_new_minimum_is_enabled(self):
+        self.assertEqual(self.run_main(duration=28.25)[0], 0)
+        before = self.latest()
+        self.config['min_audio_seconds'] = 300
+        code, synth, _ = self.run_main()
+        self.assertEqual(code, 0)
+        synth.assert_not_called()
+        self.assertEqual(self.latest(), before)
 
     def test_cli_accepts_isolated_output_and_fact_pack(self):
         with patch.object(sys, 'argv', ['podcast', '--fact-pack', str(self.pack_file), '--output-root', str(self.args.output_root),

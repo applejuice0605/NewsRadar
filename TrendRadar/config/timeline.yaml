@@ -51,9 +51,9 @@ presets:
         ai_mode: incremental
         push: true
         report_mode: incremental
-      evening_summary:
-        name: 晚报
-        start: '20:00'
+      evening_final:
+        name: 22点最终晚报
+        start: '22:00'
         end: '23:59'
         filter_method: ai
         analyze: true
@@ -74,7 +74,7 @@ presets:
       all_day:
         periods:
         - daytime_push
-        - evening_summary
+        - evening_final
         - deep_quiet
     week_map:
       1: all_day

@@ -7,6 +7,15 @@ import json
 import math
 from pathlib import Path
 import tempfile
+try:
+    from .news_quality import peripheral_reason
+except ImportError:
+    # Offline evaluators load this pure module by file path, outside a package.
+    import importlib.util
+    _spec = importlib.util.spec_from_file_location("editorial_news_quality", Path(__file__).with_name("news_quality.py"))
+    _quality = importlib.util.module_from_spec(_spec)
+    _spec.loader.exec_module(_quality)
+    peripheral_reason = _quality.peripheral_reason
 
 POLICY_VERSION = 'editorial-v2'
 LEGACY_VERSION = 'legacy_unknown'
@@ -127,6 +136,11 @@ def parse_decisions(data, titles, tags, config=None):
     tag_names = {t['id']: t.get('tag') for t in tags if type(t.get('id')) is int}
     for assessment, title in zip(assessments, titles):
         assessment['title'] = title['title']
+        boundary = peripheral_reason(title['title'])
+        if boundary == 'esports_event_not_model_evaluation' and assessment.get('decision') == 'accept':
+            assessment.update(decision='reject', reason_code=boundary,
+                reason='电竞赛果不构成模型评测或AI技术进展',
+                status='rule_rejected', completed=True)
         assessment['tag'] = tag_names.get(assessment['tag_id'])
     return assessments
 

@@ -183,6 +183,7 @@ ai:
   num_retries: 1
   fallback_models: []
 ai_analysis:
+  shared_daily_edition: true
   enabled: true
   language: Chinese
   prompt_file: ai_analysis_prompt.txt
@@ -196,12 +197,36 @@ ai_analysis:
   include_standalone: false
   include_rank_timeline: true
 podcast:
+  publication:
+    preview_repo: /Users/bruce/Coding/NewsRadar
+    max_attempts: 4
+  shared_daily_edition: true
   enabled: true
+  engine: soulx
+  script_mode: model_dialogue
+  resilient_dialogue: true
+  dialogue_prompt_file: podcast_dialogue_prompt.txt
+  source_mode: screened_articles
+  materials:
+    max_items: 6
+    max_fetch: 20
+    max_age_days: 3
+    budget_seconds: 60
+    min_material_items: 3
+    min_material_chars: 3000
+  soulx:
+    runtime_root: /Users/bruce/Coding/NewsRadar-production/.runtime/soulx
+    voice: male_1
+  daily_hour: 22
+  daily_minute: 5
   voice: zh-CN-YunyangNeural
   rate: +0%
   volume: +0%
-  max_source_chars: 12000
-  max_script_chars: 3200
+  max_source_chars: 24000
+  max_script_chars: 2600
+  min_script_chars: 1800
+  min_audio_seconds: 300
+  max_audio_seconds: 600
   retention_days: 90
   prompt_file: podcast_prompt.txt
 ai_translation:

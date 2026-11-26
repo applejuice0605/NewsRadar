@@ -8,12 +8,17 @@ from datetime import datetime
 from functools import lru_cache
 from pathlib import Path
 from html import escape
+import argparse
+import json
+import os
+from urllib.parse import unquote, urlsplit
 
 
 REPO_DIR = Path(__file__).resolve().parents[1]
 SITE_DIR = REPO_DIR / "docs"
 REPORTS_DIR = SITE_DIR / "reports"
 ARCHIVE_FILE = SITE_DIR / "archive.html"
+PODCASTS_ENABLED = True
 
 
 @lru_cache(maxsize=None)
@@ -37,9 +42,6 @@ def _report_sort_key(path: Path) -> tuple[bool, bool, bool, str]:
 
 def _report_dates() -> dict[str, list[Path]]:
     grouped: dict[str, list[Path]] = defaultdict(list)
-    if not REPORTS_DIR.exists():
-        return grouped
-
     for path in REPORTS_DIR.rglob("*.html"):
         rel = path.relative_to(SITE_DIR)
         parts = rel.parts
@@ -49,6 +51,10 @@ def _report_dates() -> dict[str, list[Path]]:
             date_key = path.stem
             if _is_date(date_key):
                 grouped[date_key].append(rel)
+
+    for day in (SITE_DIR / "audio").glob("*"):
+        if day.is_dir() and _is_date(day.name) and _podcast_url(day.name):
+            grouped.setdefault(day.name, [])
 
     for paths in grouped.values():
         paths.sort(key=lambda p: str(p), reverse=True)
@@ -63,6 +69,31 @@ def _is_date(value: str) -> bool:
         return False
 
 
+def _podcast_url(day: str) -> str | None:
+    """Only advertise an indexed, complete local episode for this date."""
+    if not PODCASTS_ENABLED:
+        return None
+    try:
+        metadata = json.loads((SITE_DIR / "audio" / day / "daily.json").read_text(encoding="utf-8"))
+        if not isinstance(metadata, dict) or metadata.get("date") != day:
+            return None
+        url = metadata.get("audio_url")
+        if not isinstance(url, str):
+            return None
+        parsed = urlsplit(url)
+        relative = unquote(parsed.path)
+        if (parsed.scheme or parsed.netloc or parsed.query or parsed.fragment
+                or not relative.startswith(f"/audio/{day}/")):
+            return None
+        audio = (SITE_DIR / relative.lstrip("/")).resolve()
+        expected = SITE_DIR.resolve() / "audio" / day
+        if not audio.is_relative_to(expected) or not audio.is_file() or audio.stat().st_size == 0:
+            return None
+        return url
+    except (OSError, ValueError, TypeError):
+        return None
+
+
 def _page_html(grouped: dict[str, list[Path]]) -> str:
     dates = list(grouped.keys())
     min_date = min(dates) if dates else ""
@@ -73,7 +104,13 @@ def _page_html(grouped: dict[str, list[Path]]) -> str:
         preferred = max(paths, key=_report_sort_key) if paths else ""
         has_ai_daily, is_daily, _has_ai = _report_profile(str(preferred)) if preferred else (False, False, False)
         report_label = "AI 汇总" if has_ai_daily else "当天汇总" if is_daily else "当天快照"
-        badge = '<span class="ai-badge">AI 分析</span>' if has_ai_daily else ""
+        has_ai = any(_report_profile(str(path))[2] for path in paths)
+        podcast_url = _podcast_url(date)
+        badge = '<span class="ai-badge">AI 分析</span>' if has_ai else ""
+        if podcast_url:
+            badge += '<span class="ai-badge podcast-badge">AI 播客</span>'
+        primary_url = "/" + str(preferred) if preferred else podcast_url or "/"
+        primary_label = "查看 " + report_label if preferred else "收听 AI 播客"
         links = "\n".join(
             f'<li><a href="/{escape(str(path))}">{escape(path.stem)}</a></li>'
             for path in paths[:12]
@@ -85,7 +122,7 @@ def _page_html(grouped: dict[str, list[Path]]) -> str:
                     <h2>{escape(date)}{badge}</h2>
                     <p>{len(paths)} 份报告</p>
                 </div>
-                <a class="primary-link" href="/{escape(str(preferred))}">查看 {report_label}</a>
+                <a class="primary-link" href="{escape(primary_url)}">{escape(primary_label)}</a>
                 <details>
                     <summary>展开当天所有快照</summary>
                     <ul>{links}</ul>
@@ -159,10 +196,10 @@ def _page_html(grouped: dict[str, list[Path]]) -> str:
       gap: 14px;
       align-items: start;
     }}
-    h2 {{ margin: 0; font-size: 24px; }}
+    h2 {{ margin: 0; font-size: 24px; display: flex; flex-wrap: wrap; align-items: center; gap: 8px; }}
     .ai-badge {{
       display: inline-block;
-      margin-left: 10px;
+      white-space: nowrap;
       padding: 4px 7px;
       background: var(--blue);
       color: white;
@@ -171,6 +208,7 @@ def _page_html(grouped: dict[str, list[Path]]) -> str:
       font-size: 12px;
       vertical-align: middle;
     }}
+    .podcast-badge {{ background: var(--yellow); color: var(--ink); }}
     p {{ margin: 8px 0 0; color: #4a4a4a; }}
     details {{ grid-column: 1 / -1; }}
     summary {{ cursor: pointer; }}
@@ -381,7 +419,22 @@ def _page_html(grouped: dict[str, list[Path]]) -> str:
 
 
 def main() -> None:
+    global SITE_DIR, REPORTS_DIR, ARCHIVE_FILE, PODCASTS_ENABLED
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument("--site-dir", type=Path, default=SITE_DIR)
+    parser.add_argument("--preview", action="store_true")
+    args = parser.parse_args()
+    from apply_site_features import parse_switch
+    is_preview = args.preview or os.environ.get("NEWSRADAR_SITE_ENV") == "preview"
+    PODCASTS_ENABLED = parse_switch(os.environ.get("NEWSRADAR_FEATURE_SPEECH"), is_preview)
+    SITE_DIR = args.site_dir.resolve()
+    REPORTS_DIR = SITE_DIR / "reports"
+    ARCHIVE_FILE = SITE_DIR / "archive.html"
+    _report_profile.cache_clear()
     ARCHIVE_FILE.write_text(_page_html(_report_dates()), encoding="utf-8")
+    if args.preview:
+        from prepare_preview_site import inject_banner
+        inject_banner(ARCHIVE_FILE)
     print(f"[site] archive generated: {ARCHIVE_FILE}")
 
 

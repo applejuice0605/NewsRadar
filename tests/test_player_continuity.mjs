@@ -44,7 +44,14 @@ class Element extends Events {
   setAttribute(key, value) { this.attrs[key] = value; }
   getBoundingClientRect() { return { height: this.tagName === 'section' ? 320 : 156 }; }
   querySelectorAll(selector) { return walk(this).filter(n => n.classList.contains(selector.slice(1))); }
-  play() { this.playCalls++; this.paused = false; this.ended = false; this.dispatch('play'); return Promise.resolve(); }
+  play() {
+    this.playCalls++;
+    if (this.rejectPlay) {
+      if (this.emitPlayBeforeReject) { this.paused = false; this.ended = false; this.dispatch('play'); }
+      return Promise.reject(this.rejectPlay);
+    }
+    this.paused = false; this.ended = false; this.dispatch('play'); return Promise.resolve();
+  }
   pause() { this.paused = true; this.dispatch('pause'); }
   load() { this.loads = (this.loads || 0) + 1; }
   metadata(duration = 200) { this.duration = duration; this.readyState = 1; this.dispatch('loadedmetadata'); }
@@ -101,6 +108,44 @@ test('restore after metadata without autoplay; persistent explicit resume plays 
   assert.match(next.find('podcast-resume-note').textContent, /切换页面会停止播放/);
 });
 
+test('resume control toggles native playback state and does not seek a changed current position', async () => {
+  const p = await render({ store: storage(seed(73)) });
+  const button = p.find('podcast-resume');
+  assert.equal(button.textContent, '继续播放 · 1:13');
+  p.audio.metadata();
+  assert.equal(p.audio.currentTime, 73);
+  p.audio.currentTime = 41;
+  button.dispatch('click');
+  assert.equal(p.audio.playCalls, 1);
+  assert.equal(p.audio.currentTime, 41);
+  assert.equal(button.textContent, '暂停播放');
+  p.audio.pause();
+  assert.equal(button.textContent, '继续播放 · 0:41');
+  button.dispatch('click');
+  assert.equal(p.audio.playCalls, 2);
+  assert.equal(button.textContent, '暂停播放');
+});
+
+test('initial, ended and rejected playback states keep the button truthful', async () => {
+  const p = await render();
+  const button = p.find('podcast-resume');
+  assert.equal(button.textContent, '开始播放');
+  p.audio.metadata();
+  button.dispatch('click');
+  assert.equal(button.textContent, '暂停播放');
+  p.audio.ended = true; p.audio.paused = true; p.audio.currentTime = 200; p.audio.dispatch('ended');
+  assert.equal(button.textContent, '重新播放');
+  button.dispatch('click');
+  assert.equal(p.audio.currentTime, 0);
+  assert.equal(button.textContent, '暂停播放');
+
+  p.audio.pause(); p.audio.rejectPlay = new Error('autoplay denied'); p.audio.emitPlayBeforeReject = true;
+  button.dispatch('click');
+  await Promise.resolve();
+  assert.equal(p.audio.paused, true);
+  assert.equal(button.textContent, '开始播放');
+});
+
 test('timeupdate is throttled to five seconds; pause, navigation and pagehide flush', async () => {
   const p = await render(); p.audio.metadata();
   p.audio.currentTime = 10; p.audio.dispatch('timeupdate');
@@ -150,7 +195,7 @@ test('date, url and source revision isolate progress; missing hash uses url/date
   for (const change of [{ source_hash: 'revision-b' }, { audio_url: '/new.mp3' }, { date: '2026-10-28' }]) {
     const meta = { ...metadata, ...change };
     const p = await render({ store, meta, path: `/reports/${meta.date}/daily.html` });
-    p.audio.metadata(); assert.equal(p.audio.currentTime, 0); assert.equal(p.find('podcast-resume').hidden, true);
+    p.audio.metadata(); assert.equal(p.audio.currentTime, 0); assert.equal(p.find('podcast-resume').hidden, false);
   }
   const legacy = { ...metadata }; delete legacy.source_hash;
   const p = await render({ store: storage(seed(42, {}, legacy)), meta: legacy });
@@ -187,7 +232,8 @@ test('ended marks complete and clears position even after pause/pagehide; replay
   p.audio.pause(); p.window.dispatch('pagehide');
   assert.equal(p.entry().position, 0); assert.equal(p.entry().completed, true);
   const next = await render({ store: p.store }); next.audio.metadata();
-  assert.equal(next.audio.currentTime, 0); assert.equal(next.find('podcast-resume').hidden, true);
+  assert.equal(next.audio.currentTime, 0); assert.equal(next.find('podcast-resume').hidden, false);
+  assert.equal(next.find('podcast-resume').textContent, '重新播放');
   next.audio.play(); next.audio.currentTime = 6; next.audio.pause();
   assert.equal(next.entry().completed, false); assert.equal(next.entry().position, 6);
 });
@@ -244,7 +290,7 @@ test('two tabs: inactive B at 10 cannot overwrite A at 80 on pause/navigation/pa
   b.document.dispatch('click', { target: { closest: () => ({ href: '/reports/' }) } });
   b.window.dispatch('pagehide');
   assert.deepEqual(b.entry(), freshEntry); assert.equal(store.writes, writes);
-  assert.match(b.find('podcast-resume').textContent, /1:20/);
+  assert.match(b.find('podcast-resume').textContent, /继续播放 · 1:20/);
   assert.equal(b.audio.currentTime, 10); assert.equal(b.audio.playCalls, 0);
   b.find('podcast-resume').dispatch('click');
   assert.equal(b.audio.currentTime, 80); assert.equal(b.audio.playCalls, 1);
@@ -264,14 +310,15 @@ test('two tabs: storage events update inactive pending resume before/after metad
   b.audio.metadata(); assert.equal(b.audio.currentTime, 80);
   a.audio.currentTime = 95; a.audio.dispatch('seeked');
   b.window.dispatch('storage', { key: KEY, newValue: store.value });
-  assert.match(b.find('podcast-resume').textContent, /1:35/);
+  assert.match(b.find('podcast-resume').textContent, /继续播放 · 1:35/);
   assert.equal(b.audio.currentTime, 80); assert.equal(b.audio.playCalls, 0);
   b.audio.dispatch('timeupdate'); b.window.dispatch('pagehide');
   assert.equal(b.entry().position, 95);
   // An externally completed episode clears the pending resume without playing B.
   a.audio.ended = true; a.audio.currentTime = 200; a.audio.dispatch('ended');
   b.window.dispatch('storage', { key: KEY, newValue: store.value });
-  assert.equal(b.find('podcast-resume').hidden, true);
+  assert.equal(b.find('podcast-resume').hidden, false);
+  assert.equal(b.find('podcast-resume').textContent, '重新播放');
   b.window.dispatch('pagehide'); assert.equal(b.entry().completed, true);
 });
 

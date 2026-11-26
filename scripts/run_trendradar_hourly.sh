@@ -43,13 +43,7 @@ if [ "$RUN_STATUS" -ne 0 ]; then
   exit "$RUN_STATUS"
 fi
 
-set +e
-(cd "$PROJECT_DIR" && "$UV_BIN" run python "$REPO_DIR/scripts/generate_daily_podcast.py")
-PODCAST_STATUS=$?
-set -e
-if [ "$PODCAST_STATUS" -ne 0 ]; then
-  echo "[$(date '+%Y-%m-%d %H:%M:%S')] daily podcast generation failed; report publishing will continue"
-fi
+# Podcast runs in its own daily worker; report publication never waits for GPU.
 
 set +e
 REPO_DIR="$REPO_DIR" "$REPO_DIR/scripts/publish_reports_site.sh"

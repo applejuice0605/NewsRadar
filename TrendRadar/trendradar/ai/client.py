@@ -38,6 +38,55 @@ class AIClient:
         self.timeout = config.get("TIMEOUT", 120)
         self.num_retries = config.get("NUM_RETRIES", 2)
         self.fallback_models = config.get("FALLBACK_MODELS", [])
+        self.last_response_metadata: Dict[str, Any] = {}
+
+    @staticmethod
+    def _response_field(value: Any, name: str) -> Any:
+        """Read a field from LiteLLM's object or dict-shaped test response."""
+        if isinstance(value, dict):
+            return value.get(name)
+        return getattr(value, name, None)
+
+    @staticmethod
+    def _metadata_scalar(value: Any) -> Any:
+        """Return only the scalar types allowed in response metadata."""
+        if isinstance(value, (str, int, float)) and not isinstance(value, bool):
+            return value
+        return None
+
+    def _record_response_metadata(self, response: Any) -> None:
+        """Keep a small, response-only summary without retaining large objects."""
+        metadata: Dict[str, Any] = {}
+        choices = self._response_field(response, "choices")
+        choice = choices[0] if choices else None
+
+        finish_reason = self._metadata_scalar(
+            self._response_field(choice, "finish_reason")
+            or self._response_field(response, "finish_reason")
+        )
+        if finish_reason is not None:
+            metadata["finish_reason"] = finish_reason
+
+        model = self._metadata_scalar(self._response_field(response, "model"))
+        if model is not None:
+            metadata["model"] = model
+
+        usage = self._response_field(response, "usage")
+        usage_metadata: Dict[str, Any] = {}
+        for field in ("prompt_tokens", "completion_tokens", "total_tokens"):
+            value = self._metadata_scalar(self._response_field(usage, field))
+            if value is not None:
+                usage_metadata[field] = value
+        completion_details = self._response_field(usage, "completion_tokens_details")
+        reasoning_tokens = self._metadata_scalar(
+            self._response_field(completion_details, "reasoning_tokens")
+        )
+        if reasoning_tokens is not None:
+            usage_metadata["reasoning_tokens"] = reasoning_tokens
+        if usage_metadata:
+            metadata["usage"] = usage_metadata
+
+        self.last_response_metadata = metadata
 
     def chat(
         self,
@@ -57,6 +106,9 @@ class AIClient:
         Raises:
             Exception: API 调用失败时抛出异常
         """
+        # Never expose metadata from a prior successful request after a failure.
+        self.last_response_metadata = {}
+
         # 构建请求参数
         params = {
             "model": self.model,
@@ -90,6 +142,7 @@ class AIClient:
 
         # 调用 LiteLLM
         response = completion(**params)
+        self._record_response_metadata(response)
 
         # 提取响应内容
         # 某些模型/提供商返回 list（内容块）而非 str，统一转为 str
