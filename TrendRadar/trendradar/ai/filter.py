@@ -408,7 +408,23 @@ class AIFilter:
             print(f"[AI筛选][DEBUG] === Prompt 结束 (长度: {sum(len(m['content']) for m in messages)} 字符) ===")
 
         try:
-            response = self.client.chat(messages)
+            budget = int(self.filter_config.get("CLASSIFICATION_MAX_TOKENS", 20000))
+            retry_budget = int(self.filter_config.get("CLASSIFICATION_RETRY_MAX_TOKENS", 32000))
+            timeout = int(self.filter_config.get("CLASSIFICATION_TIMEOUT", 180))
+            response = self.client.chat(messages, max_tokens=budget, timeout=timeout)
+            metadata = getattr(self.client, "last_response_metadata", {})
+            if metadata.get("finish_reason") == "length":
+                print(f"[AI筛选] 输出截断：{len(titles)} 条，预算 {budget}，重试预算 {retry_budget}")
+                if retry_budget > budget:
+                    response = self.client.chat(messages, max_tokens=retry_budget, timeout=timeout)
+                    metadata = getattr(self.client, "last_response_metadata", {})
+                if metadata.get("finish_reason") == "length":
+                    self.last_assessments = [
+                        dict(unknown(t["id"], "output_truncated"), title=t["title"], tag=None)
+                        for t in titles
+                    ]
+                    print("[AI筛选] 重试仍截断，保留为未完成，下轮重试")
+                    return None
 
             results = self._parse_classify_response(response, titles, tags)
             return results if any(a["completed"] for a in self.last_assessments) else None

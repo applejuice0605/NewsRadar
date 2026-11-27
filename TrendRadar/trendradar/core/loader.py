@@ -344,7 +344,10 @@ def _load_ai_filter_config(config_data: Dict) -> Dict:
     ai_filter = config_data.get("ai_filter", {})
 
     return {
-        "BATCH_SIZE": ai_filter.get("batch_size", 24),
+        "BATCH_SIZE": ai_filter.get("batch_size", 8),
+        "CLASSIFICATION_MAX_TOKENS": ai_filter.get("classification_max_tokens", 20000),
+        "CLASSIFICATION_RETRY_MAX_TOKENS": ai_filter.get("classification_retry_max_tokens", 32000),
+        "CLASSIFICATION_TIMEOUT": ai_filter.get("classification_timeout", 180),
         "BATCH_INTERVAL": ai_filter.get("batch_interval", 5),
         "INTERESTS_FILE": ai_filter.get("interests_file"),  # None = 使用默认 config/ai_interests.txt
         "PROMPT_FILE": ai_filter.get("prompt_file", "prompt.txt"),
